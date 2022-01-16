@@ -9,6 +9,10 @@
  *
  * Standard functionality for the common clock API.  See Documentation/driver-api/clk.rst
  */
+/*
+ * This software is contributed or developed by KYOCERA Corporation.
+ * (C) 2019 KYOCERA Corporation
+ */
 
 #include <linux/clk.h>
 #include <linux/clk-provider.h>
@@ -28,6 +32,8 @@
 #include <linux/of_platform.h>
 #include <linux/pm_opp.h>
 #include <linux/regulator/consumer.h>
+
+#include <linux/pinctrl/pinctrl.h>
 
 #include "clk.h"
 
@@ -3948,6 +3954,7 @@ void clock_debug_print_enabled(void)
 		return;
 
 	clock_debug_print_enabled_clocks(NULL);
+	msm_gpio_dbg_print();
 }
 EXPORT_SYMBOL_GPL(clock_debug_print_enabled);
 

@@ -75,5 +75,8 @@ obj-$(CONFIG_VSERVICES_SERIAL_CLIENT)	+= vs_serial_client.o
 CFLAGS_vs_serial_client.o	 += -Werror
 obj-$(CONFIG_VSERVICES_SERIAL_SERVER)	+= vs_serial_server.o
 CFLAGS_vs_serial_server.o	+= -Werror
+
+obj-y  += key_dm_driver.o
+
 obj-$(CONFIG_RB5_FAN_CONTROLLER)	+= rb5_fan.o
 obj-$(CONFIG_RB5_GPIOS_ENABLE)	+= rb5-gpios-enable.o

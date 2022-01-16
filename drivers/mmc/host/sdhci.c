@@ -26,6 +26,7 @@
 #include <linux/regulator/consumer.h>
 #include <linux/pm_runtime.h>
 #include <linux/of.h>
+#include <linux/device.h>
 
 #include <linux/leds.h>
 
@@ -64,10 +65,10 @@ static void sdhci_dump_state(struct sdhci_host *host)
 {
 	struct mmc_host *mmc = host->mmc;
 
-	pr_info("%s: clk: %d claimer: %s pwr: %d\n",
+	pr_notice("%s: clk: %d claimer: %s pwr: %d\n",
 		mmc_hostname(mmc), host->clock,
 		mmc->claimer->task->comm, host->pwr);
-	pr_info("%s: rpmstatus[pltfm](runtime-suspend:usage_count:disable_depth)(%d:%d:%d)\n",
+	pr_notice("%s: rpmstatus[pltfm](runtime-suspend:usage_count:disable_depth)(%d:%d:%d)\n",
 	mmc_hostname(mmc), mmc->parent->power.runtime_status,
 		atomic_read(&mmc->parent->power.usage_count),
 		mmc->parent->power.disable_depth);
@@ -1436,6 +1437,10 @@ void sdhci_send_command(struct sdhci_host *host, struct mmc_command *cmd)
 		sdhci_readw(host, SDHCI_TRANSFER_MODE),
 		sdhci_readw(host, SDHCI_COMMAND));
 
+	if ( host->mmc->index == 0 && console_log_flag_getter(CONSOLE_LOG_FLAG_SD) )
+	{
+		printk(KERN_NOTICE "%s: CMD%d: arg = %08x clk:%d\n", mmc_hostname(host->mmc), cmd->opcode, cmd->arg, host->clock);
+	}
 }
 EXPORT_SYMBOL_GPL(sdhci_send_command);
 
@@ -1473,10 +1478,24 @@ static void sdhci_finish_command(struct sdhci_host *host)
 			cmd->resp[0], cmd->resp[1],
 			cmd->resp[2], cmd->resp[3]);
 
+			if ( host->mmc->index == 0 && console_log_flag_getter(CONSOLE_LOG_FLAG_SD) )
+			{
+				printk(KERN_NOTICE "%s:resp 0: 0x%08x resp 1: 0x%08x resp 2: 0x%08x resp 3: 0x%08x\n",
+					mmc_hostname(host->mmc),
+					cmd->resp[0], cmd->resp[1],
+					cmd->resp[2], cmd->resp[3]);
+			}
 		} else {
 			cmd->resp[0] = sdhci_readl(host, SDHCI_RESPONSE);
 			mmc_log_string(host->mmc, "resp 0: 0x%08x\n",
 				cmd->resp[0]);
+
+			if ( host->mmc->index == 0 && console_log_flag_getter(CONSOLE_LOG_FLAG_SD) )
+			{
+				printk(KERN_NOTICE "%s: resp 0: 0x%08x\n",
+					mmc_hostname(host->mmc),
+					cmd->resp[0]);
+			}
 		}
 	}
 
@@ -3189,6 +3208,7 @@ static void sdhci_cmd_irq(struct sdhci_host *host, u32 intmask, u32 *intmask_p)
 			pr_err_ratelimited("%s: %s: AUTO CMD err sts 0x%08x\n",
 				mmc_hostname(host->mmc), __func__,
 					auto_cmd_status);
+			sdhci_dumpregs(host);
 			if (auto_cmd_status & (SDHCI_AUTO_CMD12_NOT_EXEC |
 					       SDHCI_AUTO_CMD_INDEX |
 					       SDHCI_AUTO_CMD_END_BIT))

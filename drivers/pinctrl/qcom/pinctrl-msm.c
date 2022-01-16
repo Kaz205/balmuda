@@ -11,6 +11,10 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  */
+/*
+ * This software is contributed or developed by KYOCERA Corporation.
+ * (C) 2019 KYOCERA Corporation
+ */
 
 #include <linux/delay.h>
 #include <linux/err.h>
@@ -40,9 +44,16 @@
 #include "pinctrl-msm.h"
 #include "../pinctrl-utils.h"
 
+#include <linux/proc_fs.h>
+
+
+
 #define MAX_NR_GPIO 300
 #define PS_HOLD_OFFSET 0x820
 #define QUP_MASK       GENMASK(5, 0)
+
+static int debug_skip_port[146] = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
+module_param_array(debug_skip_port, int, NULL, 0644);
 
 /**
  * struct msm_pinctrl - state for a pinctrl-msm device
@@ -508,7 +519,7 @@ static void msm_gpio_set(struct gpio_chip *chip, unsigned offset, int value)
 	raw_spin_unlock_irqrestore(&pctrl->lock, flags);
 }
 
-#ifdef CONFIG_DEBUG_FS
+//#ifdef CONFIG_DEBUG_FS
 #include <linux/seq_file.h>
 
 static void msm_gpio_dbg_show_one(struct seq_file *s,
@@ -541,6 +552,8 @@ static void msm_gpio_dbg_show_one(struct seq_file *s,
 
 	if (!gpiochip_line_is_valid(chip, offset))
 		return;
+	if(debug_skip_port[offset] == 1)
+		return;
 
 	g = &pctrl->soc->groups[offset];
 	ctl_reg = readl(pctrl->regs + g->ctl_reg);
@@ -562,7 +575,8 @@ static void msm_gpio_dbg_show_one(struct seq_file *s,
 	if (pctrl->soc->pull_no_keeper)
 		seq_printf(s, " %s", pulls_no_keeper[pull]);
 	else
-		seq_printf(s, " %s", pulls_keeper[pull]);
+		seq_printf(s, " %-9s", pulls_keeper[pull]);
+	seq_printf(s, " ( ctl_reg=0x%08X io_reg=0x%08X )", ctl_reg, io_reg);
 	seq_puts(s, "\n");
 }
 
@@ -575,9 +589,204 @@ static void msm_gpio_dbg_show(struct seq_file *s, struct gpio_chip *chip)
 		msm_gpio_dbg_show_one(s, NULL, chip, i, gpio);
 }
 
-#else
-#define msm_gpio_dbg_show NULL
-#endif
+//#else
+//#define msm_gpio_dbg_show NULL
+//#endif
+
+static struct gpio_chip *g_msm_gpio_chip = NULL;
+
+void msm_gpio_dbg_print(void) {
+	const struct msm_pingroup *g;
+	struct msm_pinctrl *pctrl;
+	unsigned func;
+	int is_out;
+	int drive;
+	int pull;
+	int val;
+	u32 ctl_reg, io_reg;
+	unsigned offset;
+
+	static const char * const pulls_keeper[] = {
+		"NO_PULL",
+		"PULL_DOWN",
+		"KEEPER",
+		"PULL_UP"
+	};
+
+	static const char * const pulls_no_keeper[] = {
+		"NO_PULL",
+		"PULL_DOWN",
+		"PULL_UP"
+	};
+
+	if(g_msm_gpio_chip == NULL) {
+		return;
+	}
+	pctrl = gpiochip_get_data(g_msm_gpio_chip);
+
+	for (offset = 0; offset < g_msm_gpio_chip->ngpio; offset++) {
+		if (!gpiochip_line_is_valid(g_msm_gpio_chip, offset))
+			continue;
+		if(debug_skip_port[offset] == 1)
+			continue;
+
+		g = &pctrl->soc->groups[offset];
+		ctl_reg = readl(pctrl->regs + g->ctl_reg);
+		io_reg = readl(pctrl->regs + g->io_reg);
+
+		is_out = !!(ctl_reg & BIT(g->oe_bit));
+		func = (ctl_reg >> g->mux_bit) & 7;
+		drive = (ctl_reg >> g->drv_bit) & 7;
+		pull = (ctl_reg >> g->pull_bit) & 3;
+
+		if (is_out)
+			val = !!(io_reg & BIT(g->out_bit));
+		else
+			val = !!(io_reg & BIT(g->in_bit));
+
+		if(is_out) {
+			pr_notice("GPIO[%d.]: [FS]0x%x, [DIR]OUT, [PULL]%s, [DRV]%dmA, [VAL]%s ( ctl_reg=0x%08X io_reg=0x%08X )\n",
+				offset, func, pctrl->soc->pull_no_keeper ? pulls_no_keeper[pull] : pulls_keeper[pull], msm_regval_to_drive(drive), val ? "HIGH" : "LOW", ctl_reg, io_reg);
+		}else{
+			pr_notice("GPIO[%d.]: [FS]0x%x, [DIR]IN, [PULL]%s, [DRV]%dmA ( ctl_reg=0x%08X io_reg=0x%08X )\n",
+				offset, func, pctrl->soc->pull_no_keeper ? pulls_no_keeper[pull] : pulls_keeper[pull], msm_regval_to_drive(drive), ctl_reg, io_reg);
+		}
+	}
+
+	return;
+}
+EXPORT_SYMBOL(msm_gpio_dbg_print);
+
+enum kc_gpio_reg_type{
+	KC_CFG_REG,
+	KC_IN_OUT_REG,
+};
+
+static unsigned g_debug_port = 0;
+module_param_named(port, g_debug_port, uint, 0644);
+
+static int kc_port_increment(char *buffer, const struct kernel_param *kp) {
+	g_debug_port++;
+	if(g_debug_port >= g_msm_gpio_chip->ngpio) {
+		g_debug_port = 0;
+	}
+	return 0;
+}
+module_param_call(port_incrementer, NULL, kc_port_increment, NULL, 0444);
+
+static int kc_set_gpio_reg(const char *buffer, const struct kernel_param *kp, enum kc_gpio_reg_type reg_type) {
+	int ret;
+	const struct msm_pingroup *g;
+	struct msm_pinctrl *pctrl;
+	unsigned offset = g_debug_port;
+	unsigned long flags;
+	u32 val;
+	u32 reg_offset;
+
+	ret = kstrtouint(buffer, 0, &val);
+	if(ret != 0) return ret;
+
+	pctrl = gpiochip_get_data(g_msm_gpio_chip);
+
+	if(offset < 0 || offset >= g_msm_gpio_chip->ngpio) {
+		return -EINVAL;
+	}
+
+	g = &pctrl->soc->groups[offset];
+
+	if(reg_type == KC_CFG_REG) {
+		reg_offset = g->ctl_reg;
+	}else if(reg_type == KC_IN_OUT_REG){
+		reg_offset = g->io_reg;
+	}else{
+		return -EINVAL;
+	}
+
+	raw_spin_lock_irqsave(&pctrl->lock, flags);
+	writel(val, pctrl->regs + reg_offset);
+	raw_spin_unlock_irqrestore(&pctrl->lock, flags);
+
+	return 0;
+}
+static int kc_get_gpio_reg(char *buffer, const struct kernel_param *kp, enum kc_gpio_reg_type reg_type) {
+	const struct msm_pingroup *g;
+	struct msm_pinctrl *pctrl;
+	unsigned offset = g_debug_port;
+	u32 reg_value;
+	u32 reg_offset;
+
+	pctrl = gpiochip_get_data(g_msm_gpio_chip);
+
+	if(offset < 0 || offset >= g_msm_gpio_chip->ngpio) {
+		return -EINVAL;
+	}
+
+	g = &pctrl->soc->groups[offset];
+
+	if(reg_type == KC_CFG_REG) {
+		reg_offset = g->ctl_reg;
+	}else if(reg_type == KC_IN_OUT_REG){
+		reg_offset = g->io_reg;
+	}else{
+		return -EINVAL;
+	}
+
+	reg_value = readl(pctrl->regs + reg_offset);
+
+	return sprintf(buffer, "0x%08X\n", reg_value);
+}
+
+static int kc_set_cfg_reg(const char *buffer, const struct kernel_param *kp) {
+	return kc_set_gpio_reg(buffer, kp, KC_CFG_REG);
+}
+static int kc_get_cfg_reg(char *buffer, const struct kernel_param *kp) {
+	return kc_get_gpio_reg(buffer, kp, KC_CFG_REG);
+}
+module_param_call(cfg_reg, kc_set_cfg_reg, kc_get_cfg_reg, NULL, 0644);
+
+static int kc_set_in_out_reg(const char *buffer, const struct kernel_param *kp) {
+	return kc_set_gpio_reg(buffer, kp, KC_IN_OUT_REG);
+}
+static int kc_get_in_out_reg(char *buffer, const struct kernel_param *kp) {
+	return kc_get_gpio_reg(buffer, kp, KC_IN_OUT_REG);
+}
+module_param_call(in_out_reg, kc_set_in_out_reg, kc_get_in_out_reg, NULL, 0644);
+
+#define KC_GPIO_LINE_SIZE	79
+#define KC_GPIO_NUM			200
+#define KC_GPIO_ALL_SIZE 	KC_GPIO_LINE_SIZE * KC_GPIO_NUM + 1
+static unsigned char kc_all_gpio_buffer[KC_GPIO_ALL_SIZE];
+
+
+static int kc_show_all_gpio(struct seq_file *p, void *v) {
+
+	msm_gpio_dbg_show( p, g_msm_gpio_chip );
+
+	return 0;
+}
+
+static void *kc_gpio_seq_start( struct seq_file *seq, loff_t *pos )
+{
+	if( *pos < 1 )
+		return &kc_all_gpio_buffer[*pos];
+	return NULL;
+}
+static void *kc_gpio_seq_next( struct seq_file *seq, void *v, loff_t *pos )
+{
+	++*pos;
+
+	return NULL;
+}
+static void kc_gpio_seq_stop( struct seq_file *seq, void *v )
+{
+	/* Nothing to do */
+}
+static const struct seq_operations kc_gpio_seq_ops = {
+	.start = kc_gpio_seq_start,
+	.next  = kc_gpio_seq_next,
+	.stop  = kc_gpio_seq_stop,	
+	.show  = kc_show_all_gpio
+};
 
 static const struct gpio_chip msm_gpio_template = {
 	.direction_input  = msm_gpio_direction_input,
@@ -1402,6 +1611,8 @@ static int msm_gpio_init(struct msm_pinctrl *pctrl)
 	gpiochip_set_chained_irqchip(chip, &pctrl->irq_chip, pctrl->irq,
 				     msm_gpio_irq_handler);
 
+	g_msm_gpio_chip = chip;
+
 	return 0;
 fail:
 	gpiochip_remove(&pctrl->chip);
@@ -1620,6 +1831,8 @@ int msm_pinctrl_probe(struct platform_device *pdev,
 
 	register_syscore_ops(&msm_pinctrl_pm_ops);
 	dev_dbg(&pdev->dev, "Probed Qualcomm pinctrl driver\n");
+
+	proc_create_seq("all_gpio", 0444, NULL, &kc_gpio_seq_ops);
 
 	return 0;
 }

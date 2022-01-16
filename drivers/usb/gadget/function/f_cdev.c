@@ -16,6 +16,12 @@
  * Copyright (C) 2003-2005 David Brownell
  * Copyright (C) 2006 Craig W. Nadler
  */
+/*
+ * This software is contributed or developed by KYOCERA Corporation.
+ * (C) 2018 KYOCERA Corporation
+ * (C) 2020 KYOCERA Corporation
+ * (C) 2021 KYOCERA Corporation
+ */
 
 #ifdef pr_fmt
 #undef pr_fmt
@@ -162,8 +168,8 @@ static struct usb_interface_descriptor cser_interface_desc = {
 	/* .bInterfaceNumber = DYNAMIC */
 	.bNumEndpoints =	3,
 	.bInterfaceClass =	USB_CLASS_VENDOR_SPEC,
-	.bInterfaceSubClass =	USB_SUBCLASS_VENDOR_SPEC,
-	/* .bInterfaceProtocol = DYNAMIC */
+	.bInterfaceSubClass =	0,
+	.bInterfaceProtocol =	0,
 	/* .iInterface = DYNAMIC */
 };
 
@@ -779,8 +785,8 @@ static int usb_cser_bind(struct usb_configuration *c, struct usb_function *f)
 	struct f_cdev *port = func_to_port(f);
 	int status;
 	struct usb_ep *ep;
-	struct f_cdev_opts *opts =
-			container_of(f->fi, struct f_cdev_opts, func_inst);
+//	struct f_cdev_opts *opts =
+//			container_of(f->fi, struct f_cdev_opts, func_inst);
 
 	if (cser_string_defs[0].id == 0) {
 		status = usb_string_id(c->cdev);
@@ -794,7 +800,7 @@ static int usb_cser_bind(struct usb_configuration *c, struct usb_function *f)
 		goto fail;
 	port->port_usb.data_id = status;
 	cser_interface_desc.bInterfaceNumber = status;
-	cser_interface_desc.bInterfaceProtocol = opts->proto;
+//	cser_interface_desc.bInterfaceProtocol = opts->proto;
 
 	status = -ENODEV;
 	ep = usb_ep_autoconfig(cdev->gadget, &cser_fs_in_desc);
@@ -2013,6 +2019,13 @@ static int cser_set_inst_name(struct usb_function_instance *f, const char *name)
 		port->port_usb.disconnect = dun_cser_disconnect;
 		port->port_usb.send_break = dun_cser_send_break;
 		opts->proto = 0x40;
+
+#ifdef CONFIG_KC_USB_US
+		port->port_usb.port_line_coding.dwDTERate = 0x2580;
+		port->port_usb.port_line_coding.bCharFormat = USB_CDC_1_STOP_BITS;
+		port->port_usb.port_line_coding.bParityType = USB_CDC_NO_PARITY;
+		port->port_usb.port_line_coding.bDataBits = 8;
+#endif /* CONFIG_KC_USB_US */
 	} else {
 		opts->proto = 0x60;
 	}

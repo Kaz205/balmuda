@@ -1,0 +1,31 @@
+# This software is contributed or developed by KYOCERA Corporation.
+# (C) 2021 KYOCERA Corporation
+#
+# Touchscreen driver configuration
+#
+if INPUT_TOUCHSCREEN
+
+config TOUCHSCREEN_KC
+	bool "Kyocera Touch Panel Driver"
+	default y
+	help
+	  Say Y here if you have Kyocera touch panel.
+
+	  If unsure, say N.
+
+	  To compile this dirver as a module, choose M here: the
+	  module will be called.
+
+config TOUCHSCREEN_KC_ILI9881
+	bool "Ilitek touchpanel Driver"
+	depends on I2C
+	default y
+	help
+	  Say Y here if you have a Ilitek touchscreen.
+	  This driver supports models ILI9881.
+
+	  If unsure, say N.
+
+#source "drivers/input/touchscreen/kyocera/ilitek_v3/Kconfig"
+
+endif

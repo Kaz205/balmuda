@@ -2,6 +2,10 @@
 /*
  * Copyright (c) 2014-2020, The Linux Foundation. All rights reserved.
  */
+/*
+ * This software is contributed or developed by KYOCERA Corporation.
+ * (C) 2020 KYOCERA Corporation
+ */
 
 #include <linux/kernel.h>
 #include <linux/err.h>
@@ -17,6 +21,9 @@
 #include <linux/msm-bus-board.h>
 #include <linux/msm-bus.h>
 #include <linux/dma-mapping.h>
+
+#include <linux/kcjlog.h>
+#include <linux/crash_reason.h>
 
 #include <soc/qcom/subsystem_restart.h>
 #include <soc/qcom/ramdump.h>
@@ -161,6 +168,7 @@ static struct msm_bus_scale_pdata scm_pas_bus_pdata = {
 static uint32_t scm_perf_client;
 static int scm_pas_bw_count;
 static DEFINE_MUTEX(scm_pas_bw_mutex);
+extern int is_secure_boot_err;
 
 static int scm_pas_enable_bw(void)
 {
@@ -637,6 +645,8 @@ static int pil_init_image_trusted(struct pil_desc *pil,
 	ret = scm_call2(SCM_SIP_FNID(SCM_SVC_PIL, PAS_INIT_IMAGE_CMD),
 			&desc);
 	scm_ret = desc.ret[0];
+	if (scm_ret != 0 || ret != 0)
+		is_secure_boot_err = 1;
 
 	dma_free_attrs(&dev, size, mdata_buf, mdata_phys, attrs);
 	scm_pas_disable_bw();
@@ -697,6 +707,8 @@ static int pil_auth_and_reset(struct pil_desc *pil)
 	rc = scm_call2(SCM_SIP_FNID(SCM_SVC_PIL,
 		       PAS_AUTH_AND_RESET_CMD), &desc);
 	scm_ret = desc.ret[0];
+	if (scm_ret != 0 || rc != 0)
+		is_secure_boot_err = 1;
 
 	scm_pas_disable_bw();
 	if (rc)
@@ -895,6 +907,19 @@ static irqreturn_t subsys_err_fatal_intr_handler (int irq, void *dev_id)
 							d->subsys_desc.name);
 		return IRQ_HANDLED;
 	}
+
+	if (strcmp(d->subsys_desc.name, "modem") == 0){
+		set_smem_kcjlog(SYSTEM_MODEM, KIND_FATAL);
+	}else if (strcmp(d->subsys_desc.name, "adsp") == 0) {
+		set_smem_kcjlog(SYSTEM_ADSP, KIND_FATAL);
+	}else if (strcmp(d->subsys_desc.name, "wcnss") == 0) {
+		set_smem_kcjlog(SYSTEM_PRONTO, KIND_FATAL);
+	}else{
+		set_smem_kcjlog(SYSTEM_UNKNOWN, KIND_FATAL);
+	}
+
+	set_smem_crash_info_data_add_line(__LINE__, __func__);
+
 	subsys_set_crash_status(d->subsys, CRASH_STATUS_ERR_FATAL);
 	log_failure_reason(d);
 	subsystem_restart_dev(d->subsys);
@@ -913,6 +938,19 @@ static irqreturn_t subsys_wdog_bite_irq_handler(int irq, void *dev_id)
 	if (d->subsys_desc.system_debug)
 		panic("%s: System ramdump requested. Triggering device restart!\n",
 							__func__);
+
+	if (strcmp(d->subsys_desc.name, "modem") == 0){
+		set_smem_kcjlog(SYSTEM_MODEM, KIND_WDOG_HW);
+	}else if (strcmp(d->subsys_desc.name, "adsp") == 0) {
+		set_smem_kcjlog(SYSTEM_ADSP, KIND_WDOG_HW);
+	}else if (strcmp(d->subsys_desc.name, "wcnss") == 0) {
+		set_smem_kcjlog(SYSTEM_PRONTO, KIND_WDOG_HW);
+	}else{
+		set_smem_kcjlog(SYSTEM_UNKNOWN, KIND_WDOG_HW);
+	}
+
+	set_smem_crash_info_data_add_line(__LINE__, __func__);
+
 	subsys_set_crash_status(d->subsys, CRASH_STATUS_WDOG_BITE);
 	log_failure_reason(d);
 	subsystem_restart_dev(d->subsys);

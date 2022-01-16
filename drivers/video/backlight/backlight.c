@@ -31,6 +31,8 @@ static const char *const backlight_types[] = {
 	[BACKLIGHT_FIRMWARE] = "firmware",
 };
 
+extern int kdisp_connect_get_panel_detect(void);
+
 #if defined(CONFIG_FB) || (defined(CONFIG_FB_MODULE) && \
 			   defined(CONFIG_BACKLIGHT_CLASS_DEVICE_MODULE))
 /* This callback gets called when something important happens inside a
@@ -175,15 +177,19 @@ int backlight_device_set_brightness(struct backlight_device *bd,
 {
 	int rc = -ENXIO;
 
+	if (!kdisp_connect_get_panel_detect()) {
+		pr_err("[KCDISP] panel not found\n",__func__);
+		return 0;
+	}
+
 	mutex_lock(&bd->ops_lock);
 	if (bd->ops) {
 		if (brightness > bd->props.max_brightness)
-			rc = -EINVAL;
-		else {
-			pr_debug("set brightness to %lu\n", brightness);
-			bd->props.brightness = brightness;
-			rc = backlight_update_status(bd);
-		}
+			brightness = bd->props.max_brightness;
+
+		pr_debug("set brightness to %lu\n", brightness);
+		bd->props.brightness = brightness;
+		rc = backlight_update_status(bd);
 	}
 	mutex_unlock(&bd->ops_lock);
 
@@ -231,7 +237,28 @@ static ssize_t max_brightness_show(struct device *dev,
 
 	return sprintf(buf, "%d\n", bd->props.max_brightness);
 }
-static DEVICE_ATTR_RO(max_brightness);
+
+static ssize_t max_brightness_store(struct device *dev,
+		struct device_attribute *attr, const char *buf, size_t count)
+{
+	struct backlight_device *bd = to_backlight_device(dev);
+	unsigned long state;
+	ssize_t ret = -EINVAL;
+	int rc;
+
+	ret = kstrtoul(buf, 10, &state);
+	if (ret)
+		return ret;
+
+	bd->props.max_brightness = state;
+	state = (state <= bd->usr_brightness_req) ?
+				state :
+				bd->usr_brightness_req;
+	rc = backlight_device_set_brightness(bd, state);
+
+	return rc ? rc : count;
+}
+static DEVICE_ATTR_RW(max_brightness);
 
 static ssize_t actual_brightness_show(struct device *dev,
 		struct device_attribute *attr, char *buf)

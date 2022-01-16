@@ -1,3 +1,7 @@
+/*
+ * This software is contributed or developed by KYOCERA Corporation.
+ * (C) 2020 KYOCERA Corporation
+ */
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2018-2021 The Linux Foundation. All rights reserved.
@@ -11,6 +15,7 @@
 #include <linux/regmap.h>
 #include <linux/power_supply.h>
 #include <linux/of.h>
+#include <linux/of_gpio.h>
 #include <linux/of_irq.h>
 #include <linux/log2.h>
 #include <linux/qpnp/qpnp-revid.h>
@@ -20,9 +25,12 @@
 #include <linux/iio/consumer.h>
 #include <linux/pmic-voter.h>
 #include <linux/usb/typec.h>
+#include <linux/init.h>
 #include "smb5-reg.h"
 #include "smb5-lib.h"
 #include "schgm-flash.h"
+
+#include <soc/qcom/oem_fact.h>
 
 static struct smb_params smb5_pmi632_params = {
 	.fcc			= {
@@ -219,6 +227,12 @@ struct smb_dt_props {
 	int			term_current_thresh_hi_ma;
 	int			term_current_thresh_lo_ma;
 	int			disable_suspend_on_collapse;
+#ifdef CONFIG_OEM_WIRELESS_CHARGER
+	int			term_current_hi_ma_default;
+	int			term_current_lo_ma_default;
+	int			term_current_hi_ma_wchg;
+	int			term_current_lo_ma_wchg;
+#endif
 };
 
 struct smb5 {
@@ -226,6 +240,12 @@ struct smb5 {
 	struct dentry		*dfs_root;
 	struct smb_dt_props	dt;
 };
+
+#ifdef CONFIG_OEM_WIRELESS_CHARGER
+static struct smb5 *the_chip;
+
+static int smb5_configure_iterm_thresholds(struct smb5 *chip);
+#endif
 
 static int __debug_mask;
 
@@ -443,6 +463,10 @@ static int smb5_parse_dt_misc(struct smb5 *chip, struct device_node *node)
 {
 	int rc = 0, byte_len;
 	struct smb_charger *chg = &chip->chg;
+	int w_kcfactsp_mode;
+
+	w_kcfactsp_mode = (strstr(saved_command_line, "androidboot.mode=kcfactsp") != NULL);
+	pr_info("%s w_kcfactsp_mode=D'%d\n", __func__, w_kcfactsp_mode);
 
 	of_property_read_u32(node, "qcom,sec-charger-config",
 					&chip->dt.sec_charger_config);
@@ -471,6 +495,11 @@ static int smb5_parse_dt_misc(struct smb5 *chip, struct device_node *node)
 
 	chg->lpd_disabled = chg->lpd_disabled ||
 			of_property_read_bool(node, "qcom,lpd-disable");
+
+	if( w_kcfactsp_mode != 0 ){
+	    chg->lpd_disabled = true;
+	}
+	pr_info("%s chg->lpd-disable=D'%d", __func__, chg->lpd_disabled);
 
 	rc = of_property_read_u32(node, "qcom,wd-bark-time-secs",
 					&chip->dt.wd_bark_time);
@@ -616,6 +645,16 @@ static int smb5_parse_dt_misc(struct smb5 *chip, struct device_node *node)
 	if (chg->chg_param.qc4_max_icl_ua <= 0)
 		chg->chg_param.qc4_max_icl_ua = MICRO_4PA;
 
+	rc = of_property_read_u32(node, "oem,thermal-limit-level",
+			&chg->oem_thermal_limit_level);
+	if (rc < 0)
+		chg->oem_thermal_limit_level = chg->thermal_levels;
+
+	rc = of_property_read_u32(node, "oem,wchg-disable-thresh",
+			&chg->oem_wchg_disable_thresh);
+	if (rc < 0)
+		chg->oem_wchg_disable_thresh = -1;
+
 	return 0;
 }
 
@@ -704,11 +743,47 @@ static int smb5_parse_dt_currents(struct smb5 *chip, struct device_node *node)
 	rc = of_property_read_u32(node, "qcom,chg-term-current-ma",
 			&chip->dt.term_current_thresh_hi_ma);
 
+#ifdef CONFIG_OEM_WIRELESS_CHARGER
+	chip->dt.term_current_lo_ma_default = chip->dt.term_current_thresh_lo_ma;
+	chip->dt.term_current_hi_ma_default = chip->dt.term_current_thresh_hi_ma;
+
+	rc = of_property_read_u32(node, "oem,chg-term-base-current-ma-wchg",
+			&chip->dt.term_current_lo_ma_wchg);
+	if (rc < 0) {
+		pr_err("oem,chg-term-base-current-ma-wchg can't get.\n");
+		chip->dt.term_current_lo_ma_wchg = chip->dt.term_current_lo_ma_default;
+	}
+
+	rc = of_property_read_u32(node, "oem,chg-term-current-ma-wchg",
+			&chip->dt.term_current_hi_ma_wchg);
+	if (rc < 0) {
+		pr_err("oem,chg-term-current-ma-wchg can't get.\n");
+		chip->dt.term_current_hi_ma_wchg = chip->dt.term_current_hi_ma_default;
+	}
+
+	chg->oem_wls_epp_icl_ua = DCIN_ICL_MAX_UA;
+	rc = of_property_read_u32(node, "oem,wls-epp-current-max-ua",
+			&tmp);
+	if (!rc && tmp < DCIN_ICL_MAX_UA)
+		chg->oem_wls_epp_icl_ua = tmp;
+#endif
+
 	chg->wls_icl_ua = DCIN_ICL_MAX_UA;
 	rc = of_property_read_u32(node, "qcom,wls-current-max-ua",
 			&tmp);
 	if (!rc && tmp < DCIN_ICL_MAX_UA)
 		chg->wls_icl_ua = tmp;
+
+	chg->oem_dcin_icl_ua = DCIN_ICL_MAX_UA;
+	rc = of_property_read_u32(node, "oem,dcin-current-max-ua",
+			&tmp);
+	if (!rc && tmp < DCIN_ICL_MAX_UA)
+		chg->oem_dcin_icl_ua = tmp;
+
+	chg->oem_ext_chg_det_n = of_get_named_gpio(node, "oem,ext-chg-det-n", 0);
+	if (chg->oem_ext_chg_det_n >= 0) {
+		gpio_request(chg->oem_ext_chg_det_n, "ext-chg-det-n");
+	}
 
 	return 0;
 }
@@ -867,6 +942,7 @@ static enum power_supply_property smb5_usb_props[] = {
 	POWER_SUPPLY_PROP_PD_VOLTAGE_MAX,
 	POWER_SUPPLY_PROP_PD_VOLTAGE_MIN,
 	POWER_SUPPLY_PROP_CONNECTOR_TYPE,
+	POWER_SUPPLY_PROP_SDP_CURRENT_MAX,
 	POWER_SUPPLY_PROP_CONNECTOR_HEALTH,
 	POWER_SUPPLY_PROP_VOLTAGE_MAX,
 	POWER_SUPPLY_PROP_VOLTAGE_MAX_DESIGN,
@@ -885,6 +961,7 @@ static enum power_supply_property smb5_usb_props[] = {
 	POWER_SUPPLY_PROP_APSD_TIMEOUT,
 	POWER_SUPPLY_PROP_CHARGER_STATUS,
 	POWER_SUPPLY_PROP_INPUT_VOLTAGE_SETTLED,
+	POWER_SUPPLY_PROP_HEALTH,
 };
 
 static int smb5_usb_get_prop(struct power_supply *psy,
@@ -1053,6 +1130,9 @@ static int smb5_usb_get_prop(struct power_supply *psy,
 				val->intval = (buff[1] << 8 | buff[0]) * 1038;
 		}
 		break;
+	case POWER_SUPPLY_PROP_HEALTH:
+		val->intval = POWER_SUPPLY_HEALTH_GOOD;
+		break;
 	default:
 		pr_err("get prop %d is not supported in usb\n", psp);
 		rc = -EINVAL;
@@ -1161,6 +1241,7 @@ static int smb5_usb_prop_is_writeable(struct power_supply *psy,
 {
 	switch (psp) {
 	case POWER_SUPPLY_PROP_CTM_CURRENT_MAX:
+	case POWER_SUPPLY_PROP_SDP_CURRENT_MAX:
 	case POWER_SUPPLY_PROP_CONNECTOR_HEALTH:
 	case POWER_SUPPLY_PROP_THERM_ICL_LIMIT:
 	case POWER_SUPPLY_PROP_VOLTAGE_MAX_LIMIT:
@@ -1322,6 +1403,7 @@ static enum power_supply_property smb5_usb_main_props[] = {
 	POWER_SUPPLY_PROP_COMP_CLAMP_LEVEL,
 	POWER_SUPPLY_PROP_HEALTH,
 	POWER_SUPPLY_PROP_HOT_TEMP,
+	POWER_SUPPLY_PROP_OEM_RECHARGE_VOL,
 };
 
 static int smb5_usb_main_get_prop(struct power_supply *psy,
@@ -1390,6 +1472,9 @@ static int smb5_usb_main_get_prop(struct power_supply *psy,
 	/* Use this property to report overheat status */
 	case POWER_SUPPLY_PROP_HOT_TEMP:
 		val->intval = chg->thermal_overheat;
+		break;
+	case POWER_SUPPLY_PROP_OEM_RECHARGE_VOL:
+		val->intval = chg->oem_recharge_vol;
 		break;
 	default:
 		pr_debug("get prop %d is not supported in usb-main\n", psp);
@@ -1495,6 +1580,19 @@ static int smb5_usb_main_set_prop(struct power_supply *psy,
 	case POWER_SUPPLY_PROP_HOT_TEMP:
 		rc = smblib_set_prop_thermal_overheat(chg, val->intval);
 		break;
+	case POWER_SUPPLY_PROP_OEM_RECHARGE_VOL:
+		chg->oem_recharge_vol = val->intval;
+		if (chg->oem_recharge_vol > 0) {
+			u32 temp = VBAT_TO_VRAW_ADC(chg->oem_recharge_vol);
+
+			temp = ((temp & 0xFF00) >> 8) | ((temp & 0xFF) << 8);
+			rc = smblib_batch_write(chg,
+					CHGR_ADC_RECHARGE_THRESHOLD_MSB_REG, (u8 *)&temp, 2);
+			if (rc < 0) {
+				pr_err("Couldn't configure ADC_RECHARGE_THRESHOLD REG rc=%d\n", rc);
+			}
+		}
+		break;
 	default:
 		pr_err("set prop %d is not supported\n", psp);
 		rc = -EINVAL;
@@ -1516,6 +1614,7 @@ static int smb5_usb_main_prop_is_writeable(struct power_supply *psy,
 	case POWER_SUPPLY_PROP_FORCE_MAIN_ICL:
 	case POWER_SUPPLY_PROP_COMP_CLAMP_LEVEL:
 	case POWER_SUPPLY_PROP_HOT_TEMP:
+	case POWER_SUPPLY_PROP_OEM_RECHARGE_VOL:
 		rc = 1;
 		break;
 	default:
@@ -1569,6 +1668,10 @@ static enum power_supply_property smb5_dc_props[] = {
 	POWER_SUPPLY_PROP_REAL_TYPE,
 	POWER_SUPPLY_PROP_DC_RESET,
 	POWER_SUPPLY_PROP_AICL_DONE,
+#ifdef CONFIG_OEM_WIRELESS_CHARGER
+	POWER_SUPPLY_PROP_WCHG_INHIBIT_EN,
+	POWER_SUPPLY_PROP_WCHG_DUMMY,
+#endif
 };
 
 static int smb5_dc_get_prop(struct power_supply *psy,
@@ -1578,6 +1681,9 @@ static int smb5_dc_get_prop(struct power_supply *psy,
 	struct smb5 *chip = power_supply_get_drvdata(psy);
 	struct smb_charger *chg = &chip->chg;
 	int rc = 0;
+#ifdef CONFIG_OEM_WIRELESS_CHARGER
+	static int oem_dc_present = 0;
+#endif
 
 	switch (psp) {
 	case POWER_SUPPLY_PROP_INPUT_SUSPEND:
@@ -1585,9 +1691,20 @@ static int smb5_dc_get_prop(struct power_supply *psy,
 		break;
 	case POWER_SUPPLY_PROP_PRESENT:
 		rc = smblib_get_prop_dc_present(chg, val);
+#ifdef CONFIG_OEM_WIRELESS_CHARGER
+		if (oem_chg_get_property_on_wchg(chg, POWER_SUPPLY_PROP_PRESENT) == OEM_WCHG_DET) {
+			val->intval = 0;
+		}
+		oem_dc_present = val->intval;
+#endif
 		break;
 	case POWER_SUPPLY_PROP_ONLINE:
 		rc = smblib_get_prop_dc_online(chg, val);
+#ifdef CONFIG_OEM_WIRELESS_CHARGER
+		if (oem_chg_get_property_on_wchg(chg, POWER_SUPPLY_PROP_ONLINE) == OEM_WCHG_DET) {
+			val->intval = 0;
+		}
+#endif
 		break;
 	case POWER_SUPPLY_PROP_VOLTAGE_NOW:
 		rc = smblib_get_prop_dc_voltage_now(chg, val);
@@ -1599,7 +1716,15 @@ static int smb5_dc_get_prop(struct power_supply *psy,
 		rc = smblib_get_prop_dc_voltage_max(chg, val);
 		break;
 	case POWER_SUPPLY_PROP_REAL_TYPE:
+#ifdef CONFIG_OEM_WIRELESS_CHARGER
+		if (oem_dc_present) {
+			val->intval = POWER_SUPPLY_TYPE_DC;
+		} else {
+			val->intval = POWER_SUPPLY_TYPE_UNKNOWN;
+		}
+#else
 		val->intval = POWER_SUPPLY_TYPE_WIRELESS;
+#endif
 		break;
 	case POWER_SUPPLY_PROP_INPUT_VOLTAGE_REGULATION:
 		rc = smblib_get_prop_voltage_wls_output(chg, val);
@@ -1610,6 +1735,14 @@ static int smb5_dc_get_prop(struct power_supply *psy,
 	case POWER_SUPPLY_PROP_AICL_DONE:
 		val->intval = chg->dcin_aicl_done;
 		break;
+#ifdef CONFIG_OEM_WIRELESS_CHARGER
+	case POWER_SUPPLY_PROP_WCHG_INHIBIT_EN:
+		val->intval = chg->oem_wchg_inhibit;
+		break;
+	case POWER_SUPPLY_PROP_WCHG_DUMMY:
+		val->intval = chg->oem_wchg_dummy;
+		break;
+#endif
 	default:
 		return -EINVAL;
 	}
@@ -1636,6 +1769,21 @@ static int smb5_dc_set_prop(struct power_supply *psy,
 	case POWER_SUPPLY_PROP_CURRENT_MAX:
 		rc = smblib_set_prop_dc_current_max(chg, val);
 		break;
+#ifdef CONFIG_OEM_WIRELESS_CHARGER
+	case POWER_SUPPLY_PROP_REAL_TYPE:
+		chg->oem_dc_real_type = val->intval;
+		break;
+	case POWER_SUPPLY_PROP_WCHG_INHIBIT_EN:
+		if (chg->oem_wchg_inhibit != val->intval) {
+			rc = oem_smblib_charge_inhibit_en(chg, !!val->intval);
+		}
+		break;
+	case POWER_SUPPLY_PROP_WCHG_DUMMY:
+		chg->oem_wchg_dummy = val->intval;
+		if(!chg->oem_wchg_dummy)
+			power_supply_changed(chg->batt_psy);
+		break;
+#endif
 	case POWER_SUPPLY_PROP_INPUT_VOLTAGE_REGULATION:
 		rc = smblib_set_prop_voltage_wls_output(chg, val);
 		break;
@@ -1653,6 +1801,11 @@ static int smb5_dc_prop_is_writeable(struct power_supply *psy,
 		enum power_supply_property psp)
 {
 	switch (psp) {
+#ifdef CONFIG_OEM_WIRELESS_CHARGER
+	case POWER_SUPPLY_PROP_REAL_TYPE:
+	case POWER_SUPPLY_PROP_WCHG_INHIBIT_EN:
+	case POWER_SUPPLY_PROP_WCHG_DUMMY:
+#endif
 	case POWER_SUPPLY_PROP_INPUT_VOLTAGE_REGULATION:
 	case POWER_SUPPLY_PROP_CURRENT_MAX:
 		return 1;
@@ -1665,7 +1818,7 @@ static int smb5_dc_prop_is_writeable(struct power_supply *psy,
 
 static const struct power_supply_desc dc_psy_desc = {
 	.name = "dc",
-	.type = POWER_SUPPLY_TYPE_WIRELESS,
+	.type = POWER_SUPPLY_TYPE_DC,
 	.properties = smb5_dc_props,
 	.num_properties = ARRAY_SIZE(smb5_dc_props),
 	.get_property = smb5_dc_get_prop,
@@ -1732,6 +1885,21 @@ static enum power_supply_property smb5_batt_props[] = {
 	POWER_SUPPLY_PROP_CHARGE_FULL_DESIGN,
 	POWER_SUPPLY_PROP_TIME_TO_FULL_NOW,
 	POWER_SUPPLY_PROP_FCC_STEPPER_ENABLE,
+	POWER_SUPPLY_PROP_OEM_INPUT_SUSPEND,
+	POWER_SUPPLY_PROP_OEM_BATTFET_SUSPEND,
+	POWER_SUPPLY_PROP_OEM_BATT_CHG_ENABLED,
+	POWER_SUPPLY_PROP_OEM_AUTO_ON_ENABLE,
+	POWER_SUPPLY_PROP_OEM_AUTO_ON_DETECT,
+	POWER_SUPPLY_PROP_OEM_CHGPAD_DETECT,
+	POWER_SUPPLY_PROP_OEM_CHARGER_STATUS,
+	POWER_SUPPLY_PROP_OEM_LOWBATT_BOOT,
+	POWER_SUPPLY_PROP_OEM_CHARGING_LOG,
+#ifdef CONFIG_OEM_HKADC
+	POWER_SUPPLY_PROP_USB_TEMP_LEVEL,
+#endif
+#ifdef CONFIG_OEM_WIRELESS_CHARGER
+	POWER_SUPPLY_PROP_ITERM_LIMIT_ENABLE,
+#endif
 };
 
 #define DEBUG_ACCESSORY_TEMP_DECIDEGC	250
@@ -1745,6 +1913,14 @@ static int smb5_batt_get_prop(struct power_supply *psy,
 	switch (psp) {
 	case POWER_SUPPLY_PROP_STATUS:
 		rc = smblib_get_prop_batt_status(chg, val);
+		oem_smblib_status_change_detect(chg, val->intval);
+#ifdef CONFIG_OEM_WIRELESS_CHARGER
+		rc = oem_smbchg_wchg_dummy_status(chg, val);
+#endif
+		if (chg->oem_chg_log & OEM_CHGLOG_SLOW_CHARGER_BIT &&
+				!(chg->oem_chg_log & OEM_CHGLOG_WIRELESS_CHG_BIT)) {
+			val->intval = POWER_SUPPLY_STATUS_NOT_CHARGING;
+		}
 		break;
 	case POWER_SUPPLY_PROP_HEALTH:
 		rc = smblib_get_prop_batt_health(chg, val);
@@ -1760,6 +1936,9 @@ static int smb5_batt_get_prop(struct power_supply *psy,
 		break;
 	case POWER_SUPPLY_PROP_CAPACITY:
 		rc = smblib_get_prop_batt_capacity(chg, val);
+#ifdef CONFIG_OEM_WIRELESS_CHARGER
+		rc = oem_smbchg_wchg_capcity_check(chg, val);
+#endif
 		break;
 	case POWER_SUPPLY_PROP_CHARGE_CONTROL_LIMIT:
 		rc = smblib_get_prop_system_temp_level(chg, val);
@@ -1884,6 +2063,46 @@ static int smb5_batt_get_prop(struct power_supply *psy,
 	case POWER_SUPPLY_PROP_FCC_STEPPER_ENABLE:
 		val->intval = chg->fcc_stepper_enable;
 		break;
+	case POWER_SUPPLY_PROP_OEM_INPUT_SUSPEND:
+		val->intval = (get_client_vote(chg->usb_icl_votable, OEM_CMD_VOTER) == 0);
+		break;
+	case POWER_SUPPLY_PROP_OEM_BATTFET_SUSPEND:
+		val->intval = get_client_vote(chg->chg_disable_votable, OEM_CMD_VOTER);
+		break;
+	case POWER_SUPPLY_PROP_OEM_BATT_CHG_ENABLED:
+		val->intval = !(get_client_vote(chg->chg_disable_votable, OEM_BATT_CHG_EN_VOTER));
+		break;
+	case POWER_SUPPLY_PROP_OEM_AUTO_ON_ENABLE:
+		val->intval = chg->oem_auto_on_enable;
+		break;
+	case POWER_SUPPLY_PROP_OEM_AUTO_ON_DETECT:
+		val->intval = chg->oem_auto_on_detect;
+		break;
+	case POWER_SUPPLY_PROP_OEM_CHGPAD_DETECT:
+		val->intval = chg->oem_chgpad_detect;
+		break;
+	case POWER_SUPPLY_PROP_OEM_CHARGER_STATUS:
+		val->intval = chg->oem_charger_status;
+		break;
+	case POWER_SUPPLY_PROP_OEM_LOWBATT_BOOT:
+		val->intval = chg->oem_lowbatt_boot;
+		break;
+	case POWER_SUPPLY_PROP_OEM_CHARGING_LOG:
+		val->intval = chg->oem_chg_log;
+		if (chg->oem_chg_log & OEM_CHGLOG_WIRELESS_CHG_BIT) {
+			val->intval &= (OEM_CHGLOG_WIRELESS_CHG_BIT | OEM_CHGLOG_WARM_STOP_BIT | OEM_CHGLOG_COOL_STOP_BIT);
+		}
+		break;
+#ifdef CONFIG_OEM_HKADC
+	case POWER_SUPPLY_PROP_USB_TEMP_LEVEL:
+		val->intval = chg->oem_usb_temp_level;
+		break;
+#endif
+#ifdef CONFIG_OEM_WIRELESS_CHARGER
+	case POWER_SUPPLY_PROP_ITERM_LIMIT_ENABLE:
+		val->intval = chg->oem_iterm_limit_enable;
+		break;
+#endif
 	default:
 		pr_err("batt power supply prop %d not supported\n", psp);
 		return -EINVAL;
@@ -1912,7 +2131,11 @@ static int smb5_batt_set_prop(struct power_supply *psy,
 		rc = smblib_set_prop_input_suspend(chg, val);
 		break;
 	case POWER_SUPPLY_PROP_CHARGE_CONTROL_LIMIT:
+		if(oem_fact_get_option_bit(OEM_FACT_OPTION_ITEM_01, 3)){
+			break;
+		}
 		rc = smblib_set_prop_system_temp_level(chg, val);
+		rc = oem_smblib_chglog_temp_level(chg);
 		break;
 	case POWER_SUPPLY_PROP_CAPACITY:
 		rc = smblib_set_prop_batt_capacity(chg, val);
@@ -1991,6 +2214,38 @@ static int smb5_batt_set_prop(struct power_supply *psy,
 	case POWER_SUPPLY_PROP_FCC_STEPPER_ENABLE:
 		chg->fcc_stepper_enable = val->intval;
 		break;
+	case POWER_SUPPLY_PROP_OEM_INPUT_SUSPEND:
+		vote(chg->usb_icl_votable, OEM_CMD_VOTER, val->intval, 0);
+		break;
+	case POWER_SUPPLY_PROP_OEM_BATTFET_SUSPEND:
+		vote(chg->chg_disable_votable, OEM_CMD_VOTER, val->intval, 0);
+		break;
+	case POWER_SUPPLY_PROP_OEM_BATT_CHG_ENABLED:
+		vote(chg->chg_disable_votable, OEM_BATT_CHG_EN_VOTER, !val->intval, 0);
+		break;
+	case POWER_SUPPLY_PROP_OEM_AUTO_ON_ENABLE:
+		chg->oem_auto_on_enable = val->intval;
+		break;
+	case POWER_SUPPLY_PROP_OEM_LOWBATT_BOOT:
+		chg->oem_lowbatt_boot = val->intval;
+		break;
+	case POWER_SUPPLY_PROP_OEM_CHARGING_LOG:
+		chg->oem_chg_log = val->intval;
+		break;
+#ifdef CONFIG_OEM_HKADC
+	case POWER_SUPPLY_PROP_USB_TEMP_LEVEL:
+		chg->oem_usb_temp_level = val->intval;
+		rc = oem_smblib_charger_output_en(chg);
+		break;
+#endif
+#ifdef CONFIG_OEM_WIRELESS_CHARGER
+	case POWER_SUPPLY_PROP_ITERM_LIMIT_ENABLE:
+		if (chg->oem_iterm_limit_enable != val->intval) {
+			chg->oem_iterm_limit_enable = val->intval;
+			rc = smb5_configure_iterm_thresholds(the_chip);
+		}
+		break;
+#endif
 	default:
 		rc = -EINVAL;
 	}
@@ -2011,7 +2266,21 @@ static int smb5_batt_prop_is_writeable(struct power_supply *psy,
 	case POWER_SUPPLY_PROP_RERUN_AICL:
 	case POWER_SUPPLY_PROP_INPUT_CURRENT_LIMITED:
 	case POWER_SUPPLY_PROP_STEP_CHARGING_ENABLED:
+	case POWER_SUPPLY_PROP_SET_SHIP_MODE:
 	case POWER_SUPPLY_PROP_DIE_HEALTH:
+	case POWER_SUPPLY_PROP_CHARGE_CONTROL_LIMIT:
+	case POWER_SUPPLY_PROP_OEM_INPUT_SUSPEND:
+	case POWER_SUPPLY_PROP_OEM_BATTFET_SUSPEND:
+	case POWER_SUPPLY_PROP_OEM_BATT_CHG_ENABLED:
+	case POWER_SUPPLY_PROP_OEM_AUTO_ON_ENABLE:
+	case POWER_SUPPLY_PROP_OEM_LOWBATT_BOOT:
+	case POWER_SUPPLY_PROP_OEM_CHARGING_LOG:
+#ifdef CONFIG_OEM_HKADC
+	case POWER_SUPPLY_PROP_USB_TEMP_LEVEL:
+#endif
+#ifdef CONFIG_OEM_WIRELESS_CHARGER
+	case POWER_SUPPLY_PROP_ITERM_LIMIT_ENABLE:
+#endif
 		return 1;
 	default:
 		break;
@@ -2398,6 +2667,16 @@ static int smb5_configure_iterm_thresholds(struct smb5 *chip)
 {
 	int rc = 0;
 	struct smb_charger *chg = &chip->chg;
+
+#ifdef CONFIG_OEM_WIRELESS_CHARGER
+	if (chg->oem_iterm_limit_enable) {
+		chip->dt.term_current_thresh_hi_ma = chip->dt.term_current_hi_ma_wchg;
+		chip->dt.term_current_thresh_lo_ma = chip->dt.term_current_lo_ma_wchg;
+	} else {
+		chip->dt.term_current_thresh_hi_ma = chip->dt.term_current_hi_ma_default;
+		chip->dt.term_current_thresh_lo_ma = chip->dt.term_current_lo_ma_default;
+	}
+#endif
 
 	switch (chip->dt.term_current_src) {
 	case ITERM_SRC_ADC:
@@ -2911,7 +3190,7 @@ static int smb5_init_hw(struct smb5 *chip)
 	}
 
 	rc = smblib_write(chg, CHGR_FAST_CHARGE_SAFETY_TIMER_CFG_REG,
-					FAST_CHARGE_SAFETY_TIMER_768_MIN);
+					FAST_CHARGE_SAFETY_TIMER_1536_MIN);
 	if (rc < 0) {
 		dev_err(chg->dev, "Couldn't set CHGR_FAST_CHARGE_SAFETY_TIMER_CFG_REG rc=%d\n",
 			rc);
@@ -3597,6 +3876,10 @@ static int smb5_probe(struct platform_device *pdev)
 		pr_err("Smblib_init failed rc=%d\n", rc);
 		return rc;
 	}
+
+#ifdef CONFIG_OEM_WIRELESS_CHARGER
+	the_chip = chip;
+#endif
 
 	/* set driver data before resources request it */
 	platform_set_drvdata(pdev, chip);

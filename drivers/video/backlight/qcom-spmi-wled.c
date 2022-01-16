@@ -24,6 +24,9 @@
 #include <linux/qpnp/qpnp-revid.h>
 #include <linux/leds-qpnp-flash.h>
 #include "../../leds/leds.h"
+//#ifdef KCLIGHT_CUST
+#include <linux/kclight.h>
+//#endif
 
 /* General definitions */
 #define WLED_DEFAULT_BRIGHTNESS		2048
@@ -301,6 +304,15 @@ static int wled_module_enable(struct wled *wled, int val)
 
 	if (wled->force_mod_disable)
 		return 0;
+
+#ifdef KCLIGHT_CUST
+#ifdef KCLIGHT_WLED_ENABLE_DLY
+	if (val) {
+		usleep_range(KC_WLED_ENABLE_DLY_US,
+				KC_WLED_ENABLE_DLY_US + 1000);
+	}
+#endif /* KCLIGHT_WLED_ENABLE_DLY */
+#endif /* KCLIGHT_CUST */
 
 	/* Force HFRC off */
 	if (*wled->version == WLED_PM8150L) {
@@ -1089,6 +1101,9 @@ static int wled5_setup(struct wled *wled)
 	u16 addr;
 	u32 val;
 	u8 string_cfg = wled->cfg.string_cfg;
+#ifdef KCLIGHT_CUST
+	int fs_current = 10;
+#endif /* KCLIGHT_CUST */
 
 	rc = wled_flash_setup(wled);
 	if (rc < 0)
@@ -1121,9 +1136,30 @@ static int wled5_setup(struct wled *wled)
 		if (string_cfg & BIT(i)) {
 			addr = wled->sink_addr +
 					WLED5_SINK_FS_CURR_REG(i);
+
+#ifdef KCLIGHT_CUST
+		  if(wled->cfg.fs_current == 10){
 			rc = regmap_update_bits(wled->regmap, addr,
 					WLED_SINK_FS_MASK,
 					wled->cfg.fs_current);
+			pr_err("[KCLIGHT]%s: WLED5_SINK_FS_CURR_REG(%d) addr(%d) fs_current(%d)\n", __func__, i, addr, wled->cfg.fs_current);
+		  }else{
+			if(i==0 || i ==1){
+				fs_current = 9;
+			}
+			if(i==2){
+				fs_current = 11;
+			}
+			rc = regmap_update_bits(wled->regmap, addr,
+					WLED_SINK_FS_MASK,
+					fs_current);
+			pr_err("[KCLIGHT]%s: WLED5_SINK_FS_CURR_REG(%d) addr(%d) fs_current(%d)\n", __func__, i, addr, fs_current);
+		  }
+#else
+			rc = regmap_update_bits(wled->regmap, addr,
+					WLED_SINK_FS_MASK,
+					wled->cfg.fs_current);
+#endif /* KCLIGHT_CUST */
 			if (rc < 0)
 				return rc;
 

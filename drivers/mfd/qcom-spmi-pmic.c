@@ -114,6 +114,109 @@ static const struct regmap_config spmi_regmap_config = {
 	.fast_io	= true,
 };
 
+struct spmi_class_dev {
+	struct class spmi_class;
+	struct regmap *regmap;
+	u16 address;
+	u16 count;
+};
+
+static ssize_t data_store(struct class *c, struct class_attribute *attr,
+	const char *buf, size_t count)
+{
+	struct spmi_class_dev *scdev = container_of(c, struct spmi_class_dev,
+	spmi_class);
+	u8 val = 0;
+
+	if (kstrtou8(buf, 0, &val)) {
+		pr_err("spmi_class: failed to convert data in buffer to u8 value\n");
+		return -EINVAL;
+	}
+	regmap_write(scdev->regmap, scdev->address, val);
+
+	return count;
+}
+
+#define REG_DATA_SIZE 224
+
+static ssize_t data_show(struct class *c, struct class_attribute *attr,
+	char *buf)
+{
+	struct spmi_class_dev *scdev = container_of(c, struct spmi_class_dev,
+	spmi_class);
+	char temp[REG_DATA_SIZE];
+	unsigned int val = 0;
+	int i, rc, pos = 0;
+	u16 count = min(min(scdev->count, (u16)0xF), (u16)0xFFFF-scdev->address); //max 0xF bytes
+
+	for (i = 0; i <= count; i++) {
+		regmap_read(scdev->regmap, scdev->address + i, &val);
+		rc = snprintf(temp + pos, REG_DATA_SIZE, "0x%04x: 0x%02x\n", scdev->address + i, val);
+		pos += rc;
+
+		if (pos >= (REG_DATA_SIZE - 9))
+			break;
+	}
+
+	return scnprintf(buf, REG_DATA_SIZE, "%s", temp);
+}
+
+static CLASS_ATTR_RW(data);
+
+static ssize_t count_store(struct class *c, struct class_attribute *attr,
+	const char *buf, size_t count)
+{
+	struct spmi_class_dev *scdev = container_of(c, struct spmi_class_dev,
+	spmi_class);
+
+	if (kstrtou16(buf, 0, &scdev->count))
+		return -EINVAL;
+
+	return count;
+}
+
+static ssize_t count_show(struct class *c, struct class_attribute *attr,
+	char *buf)
+{
+	struct spmi_class_dev *scdev = container_of(c, struct spmi_class_dev,
+	spmi_class);
+
+	return scnprintf(buf, 8, "%d\n", scdev->count);
+}
+
+static CLASS_ATTR_RW(count);
+
+static ssize_t address_store(struct class *c, struct class_attribute *attr,
+	const char *buf, size_t count)
+{
+	struct spmi_class_dev *scdev = container_of(c, struct spmi_class_dev,
+	spmi_class);
+
+	if (kstrtou16(buf, 0, &scdev->address))
+		return -EINVAL;
+	return count;
+}
+
+static ssize_t address_show(struct class *c, struct class_attribute *attr,
+	char *buf)
+{
+	struct spmi_class_dev *scdev = container_of(c, struct spmi_class_dev,
+	spmi_class);
+
+	return scnprintf(buf, 8, "0x%x\n", scdev->address);
+}
+
+static CLASS_ATTR_RW(address);
+
+static struct attribute *spmi_class_attrs[] = {
+	&class_attr_address.attr,
+	&class_attr_count.attr,
+	&class_attr_data.attr,
+	NULL,
+};
+
+ATTRIBUTE_GROUPS(spmi_class);
+
 static const struct regmap_config spmi_regmap_can_sleep_config = {
 	.reg_bits	= 16,
 	.val_bits	= 8,
@@ -125,6 +228,8 @@ static int pmic_spmi_probe(struct spmi_device *sdev)
 {
 	struct device_node *root = sdev->dev.of_node;
 	struct regmap *regmap;
+	struct spmi_class_dev *scdev;
+	int rc;
 
 	if (of_property_read_bool(root, "qcom,can-sleep"))
 		regmap = devm_regmap_init_spmi_ext(sdev,
@@ -137,6 +242,19 @@ static int pmic_spmi_probe(struct spmi_device *sdev)
 	/* Only the first slave id for a PMIC contains this information */
 	if (sdev->usid % 2 == 0)
 		pmic_spmi_show_revid(regmap, &sdev->dev);
+
+	scdev = devm_kzalloc(&sdev->dev, sizeof(*scdev), GFP_KERNEL);
+
+	if (!scdev)
+		pr_err("Failed to alloc spmi class\n");
+	else {
+		scdev->regmap = regmap;
+		scdev->spmi_class.name = dev_name(&sdev->dev);
+		scdev->spmi_class.class_groups = spmi_class_groups;
+		rc = class_register(&scdev->spmi_class);
+	if (rc < 0)
+		pr_err("Failed to create spmi class rc=%d\n", rc);
+	}
 
 	return devm_of_platform_populate(&sdev->dev);
 }

@@ -4,10 +4,13 @@
 #include <linux/err.h>
 #include <linux/string.h>
 #include <linux/bitfield.h>
+#include <linux/device.h>
 #include <asm/unaligned.h>
 
 #include "ufs.h"
 #include "ufs-sysfs.h"
+
+unsigned long console_log_flag = 0; /* console log flag (for debug) OFF:0 ON:Other */
 
 static const char *ufschd_uic_link_state_to_string(
 			enum uic_link_state state)
@@ -746,6 +749,16 @@ UFS_ATTRIBUTE(wb_avail_buf, _AVAIL_WB_BUFF_SIZE);
 UFS_ATTRIBUTE(wb_life_time_est, _WB_BUFF_LIFE_TIME_EST);
 UFS_ATTRIBUTE(wb_cur_buf, _CURR_WB_BUFF_SIZE);
 
+static ssize_t console_log_flag_show (struct device *dev, struct device_attribute *attr, char *buf) {
+	return sprintf(buf, "%ld\n", console_log_flag); 
+} 
+
+static ssize_t console_log_flag_store (struct device *dev, struct device_attribute *attr, const char *buf, size_t len) {
+	console_log_flag = simple_strtoul(buf, NULL, 0); 
+	return len;
+}
+
+static DEVICE_ATTR(console_log_flag, S_IRUGO|S_IWUSR, console_log_flag_show, console_log_flag_store);
 
 static struct attribute *ufs_sysfs_attributes[] = {
 	&dev_attr_boot_lun_enabled.attr,
@@ -768,6 +781,7 @@ static struct attribute *ufs_sysfs_attributes[] = {
 	&dev_attr_wb_avail_buf.attr,
 	&dev_attr_wb_life_time_est.attr,
 	&dev_attr_wb_cur_buf.attr,
+	&dev_attr_console_log_flag.attr,
 	NULL,
 };
 
@@ -889,3 +903,9 @@ void ufs_sysfs_remove_nodes(struct device *dev)
 {
 	sysfs_remove_groups(&dev->kobj, ufs_sysfs_groups);
 }
+
+unsigned long console_log_flag_getter( unsigned long flag_sel )
+{
+	return (console_log_flag & CONSOLE_LOG_FLAG_MASK) & flag_sel;
+}
+

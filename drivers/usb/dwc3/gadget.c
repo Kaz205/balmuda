@@ -7,6 +7,10 @@
  * Authors: Felipe Balbi <balbi@ti.com>,
  *	    Sebastian Andrzej Siewior <bigeasy@linutronix.de>
  */
+/*
+ * This software is contributed or developed by KYOCERA Corporation.
+ * (C) 2020 KYOCERA Corporation
+ */
 
 #include <linux/kernel.h>
 #include <linux/delay.h>
@@ -22,6 +26,9 @@
 #include <linux/usb/ch9.h>
 #include <linux/usb/composite.h>
 #include <linux/usb/gadget.h>
+
+#include <linux/soc/qcom/smem.h>
+#include <soc/qcom/oem_fact.h>
 
 #include "debug.h"
 #include "core.h"
@@ -2255,10 +2262,24 @@ static int dwc3_gadget_run_stop(struct dwc3 *dwc, int is_on, int suspend)
 		reg1 = dwc3_readl(dwc->regs, DWC3_DCFG);
 		reg1 &= ~(DWC3_DCFG_SPEED_MASK);
 
+#ifndef CONFIG_KC_USB_SS
+		if (oem_fact_get_option_bit(OEM_FACT_OPTION_ITEM_03, 0)) {
+			dwc->max_hw_supp_speed = dwc->maximum_speed = USB_SPEED_FULL;
+		} else {
+			dwc->max_hw_supp_speed = dwc->maximum_speed = USB_SPEED_HIGH;
+		}
+#else
+		if (oem_fact_get_option_bit(OEM_FACT_OPTION_ITEM_03, 0)) {
+			dwc->maximum_speed = USB_SPEED_FULL;
+		}
+#endif
+
 		if (dwc->maximum_speed == USB_SPEED_SUPER_PLUS)
 			reg1 |= DWC3_DCFG_SUPERSPEED_PLUS;
 		else if (dwc->maximum_speed == USB_SPEED_HIGH)
 			reg1 |= DWC3_DCFG_HIGHSPEED;
+		else if (dwc->maximum_speed == USB_SPEED_FULL)
+			reg1 |= DWC3_DCFG_FULLSPEED;
 		else
 			reg1 |= DWC3_DCFG_SUPERSPEED;
 		dwc3_writel(dwc->regs, DWC3_DCFG, reg1);
@@ -2511,14 +2532,8 @@ static void dwc3_gadget_enable_irq(struct dwc3 *dwc)
 			DWC3_DEVTEN_USBRSTEN |
 			DWC3_DEVTEN_DISCONNEVTEN);
 
-	/*
-	 * Enable SUSPENDEVENT(BIT:6) for version 230A and above
-	 * else enable USB Link change event (BIT:3) for older version
-	 */
 	if (dwc->revision < DWC3_REVISION_230A)
 		reg |= DWC3_DEVTEN_ULSTCNGEN;
-	else
-		reg |= DWC3_DEVTEN_EOPFEN;
 
 	dwc3_writel(dwc->regs, DWC3_DEVTEN, reg);
 }
@@ -3582,6 +3597,13 @@ static void dwc3_gadget_conndone_interrupt(struct dwc3 *dwc)
 	reg = dwc3_readl(dwc->regs, DWC3_DSTS);
 	speed = reg & DWC3_DSTS_CONNECTSPD;
 	dwc->speed = speed;
+
+	/* Enable SUSPENDEVENT(BIT:6) for version 230A and above */
+	if (dwc->revision >= DWC3_REVISION_230A) {
+		reg = dwc3_readl(dwc->regs, DWC3_DEVTEN);
+		reg |= DWC3_DEVTEN_EOPFEN;
+		dwc3_writel(dwc->regs, DWC3_DEVTEN, reg);
+	}
 
 	/* Reset the retry on erratic error event count */
 	dwc->retries_on_error = 0;

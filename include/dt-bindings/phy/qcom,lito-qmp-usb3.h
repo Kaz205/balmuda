@@ -2,6 +2,10 @@
 /*
  * Copyright (c) 2019, The Linux Foundation. All rights reserved.
  */
+/*
+ * This software is contributed or developed by KYOCERA Corporation.
+ * (C) 2020 KYOCERA Corporation
+ */
 
 #ifndef _DT_BINDINGS_PHY_QCOM_LITO_QMP_USB_H
 #define _DT_BINDINGS_PHY_QCOM_LITO_QMP_USB_H
@@ -724,4 +728,6 @@
 #define USB3_DP_PCS_USB3_TEST_CONTROL				0x1f58
 #define USB3_DP_PCS_USB3_RXTERMINATION_DLY_SEL			0x1f5c
 
+#define USB3_DP_QSERDES_TX0_PRE_EMPH			0x22e8
+#define USB3_DP_QSERDES_TX1_PRE_EMPH			0x26e8
 #endif /* _DT_BINDINGS_PHY_QCOM_LITO_QMP_USB_H */

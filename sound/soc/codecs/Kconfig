@@ -1311,4 +1311,34 @@ config SND_SOC_TPA6130A2
 	tristate "Texas Instruments TPA6130A2 headphone amplifier"
 	depends on I2C
 
+# GB1003A Start AUD_18_0003
+config SND_SOC_TFA98XX
+	tristate
+	default y
+
+# add for NXP smart PA TFA9888
+source "sound/soc/codecs/tfa/Kconfig"
+# GB1003A End AUD_18_0003
+
+# EB1073A Start AUD_18_0072
+config SND_SOC_TAS256X
+	tristate
+	default y
+
+config TAS2563_CODEC
+	tristate
+	default y
+
+config TAS2563_MISC
+	tristate
+	default y
+
+config TAS2563_REGMAP
+	tristate
+	default y
+
+# add for TI smart PA TAS256X
+source "sound/soc/codecs/tas256x/Kconfig"
+# EB1073A End AUD_18_0072
+
 endmenu

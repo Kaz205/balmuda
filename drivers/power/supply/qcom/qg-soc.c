@@ -259,6 +259,15 @@ static int qg_process_tcss_soc(struct qpnp_qg *chip, int sys_soc)
 	else if (++chip->tcss_entry_count < TCSS_ENTRY_COUNT)
 		goto skip_entry_count;
 
+#ifdef CONFIG_OEM_WIRELESS_CHARGER
+	rc = power_supply_get_property(chip->batt_psy,
+			POWER_SUPPLY_PROP_ITERM_LIMIT_ENABLE, &prop);
+
+	if (prop.intval > 0) {
+		qg_iterm_ua = (-1 * chip->dt.iterm_ma_wchg * 1000);
+	}
+#endif
+
 	if (!chip->tcss_active) {
 		chip->soc_tcss = sys_soc;
 		chip->soc_tcss_entry = sys_soc;

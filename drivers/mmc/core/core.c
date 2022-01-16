@@ -1076,9 +1076,11 @@ void mmc_request_done(struct mmc_host *host, struct mmc_request *mrq)
 			cmd->resp[2], cmd->resp[3]);
 
 		if (mrq->data) {
-			pr_debug("%s:     %d bytes transferred: %d\n",
-				mmc_hostname(host),
-				mrq->data->bytes_xfered, mrq->data->error);
+			if ( host->index == 0 && mrq->stop && console_log_flag_getter(CONSOLE_LOG_FLAG_SD) ) {
+				pr_notice("%s:     %d bytes transferred: %d\n",
+					mmc_hostname(host),
+					mrq->data->bytes_xfered, mrq->data->error);
+			}
 		}
 
 		if (mrq->stop) {
@@ -1151,9 +1153,11 @@ static void mmc_mrq_pr_debug(struct mmc_host *host, struct mmc_request *mrq,
 			     bool cqe)
 {
 	if (mrq->sbc) {
-		pr_debug("<%s: starting CMD%u arg %08x flags %08x>\n",
-			 mmc_hostname(host), mrq->sbc->opcode,
-			 mrq->sbc->arg, mrq->sbc->flags);
+		if ( host->index == 0 && console_log_flag_getter(CONSOLE_LOG_FLAG_SD) ){
+			pr_notice("<%s: starting CMD%u arg %08x flags %08x>\n",
+				mmc_hostname(host), mrq->sbc->opcode,
+				mrq->sbc->arg, mrq->sbc->flags);
+		}
 	}
 
 	if (mrq->cmd) {

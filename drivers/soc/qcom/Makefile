@@ -1,3 +1,9 @@
+# This software is contributed or developed by KYOCERA Corporation.
+# (C) 2018 KYOCERA Corporation
+# (C) 2019 KYOCERA Corporation
+# (C) 2020 KYOCERA Corporation
+#
+
 CFLAGS_rpmh-rsc.o := -I$(src)
 obj-$(CONFIG_QCOM_COMMAND_DB) += cmd-db.o
 obj-$(CONFIG_QCOM_GLINK_SSR) +=	glink_ssr.o
@@ -109,3 +115,5 @@ obj-$(CONFIG_QTI_CRYPTO_TZ) += crypto-qti-tz.o
 obj-$(CONFIG_QTI_HW_KEY_MANAGER) += hwkm_qti.o
 hwkm_qti-y += hwkm.o
 obj-$(CONFIG_MSM_BAM_DMUX) += bam_dmux.o
+#OEM FACT
+obj-y += oem_fact.o

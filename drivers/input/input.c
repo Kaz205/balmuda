@@ -9,6 +9,10 @@
  * under the terms of the GNU General Public License version 2 as published by
  * the Free Software Foundation.
  */
+/*
+ * This software is contributed or developed by KYOCERA Corporation.
+ * (C) 2019 KYOCERA Corporation
+ */
 
 #define pr_fmt(fmt) KBUILD_BASENAME ": " fmt
 
@@ -28,6 +32,7 @@
 #include <linux/mutex.h>
 #include <linux/rcupdate.h>
 #include "input-compat.h"
+#include "logcapture/logcapture.h"
 
 MODULE_AUTHOR("Vojtech Pavlik <vojtech@suse.cz>");
 MODULE_DESCRIPTION("Input core");
@@ -286,6 +291,7 @@ static int input_get_disposition(struct input_dev *dev,
 	case EV_KEY:
 		if (is_event_supported(code, dev->keybit, KEY_MAX)) {
 
+			check_logcapture(dev,code,value);
 			/* auto-repeat bypasses state updates */
 			if (value == 2) {
 				disposition = INPUT_PASS_TO_HANDLERS;
@@ -2493,6 +2499,8 @@ static int __init input_init(void)
 		goto fail2;
 	}
 
+	logcapture_init();
+
 	return 0;
 
  fail2:	input_proc_exit();
@@ -2502,6 +2510,7 @@ static int __init input_init(void)
 
 static void __exit input_exit(void)
 {
+	logcapture_exit();
 	input_proc_exit();
 	unregister_chrdev_region(MKDEV(INPUT_MAJOR, 0),
 				 INPUT_MAX_CHAR_DEVICES);

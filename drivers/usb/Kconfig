@@ -1,6 +1,10 @@
 #
 # USB device configuration
 #
+#
+# This software is contributed or developed by KYOCERA Corporation.
+# (C) 2020 KYOCERA Corporation
+#
 
 config USB_OHCI_BIG_ENDIAN_DESC
 	bool
@@ -18,6 +22,21 @@ config USB_EHCI_BIG_ENDIAN_MMIO
 
 config USB_EHCI_BIG_ENDIAN_DESC
 	bool
+
+config KC_USB_SS
+	tristate
+
+config KC_USB_US
+	tristate
+
+config KC_USB_MDM
+	tristate
+
+config KC_USB_SRC_CAP_900
+	tristate
+
+config KC_USB_SWIC
+	tristate
 
 config USB_UHCI_BIG_ENDIAN_MMIO
 	bool
@@ -45,6 +64,11 @@ config USB
 	tristate "Support for Host-side USB"
 	depends on USB_ARCH_HAS_HCD
 	select USB_COMMON
+	select KC_USB_SS
+	select KC_USB_US
+	select KC_USB_MDM
+	select KC_USB_SRC_CAP_900
+	select KC_USB_SWIC
 	select NLS  # for UTF-8 strings
 	---help---
 	  Universal Serial Bus (USB) is a specification for a serial bus

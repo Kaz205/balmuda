@@ -1,3 +1,7 @@
+/*
+ * This software is contributed or developed by KYOCERA Corporation.
+ * (C) 2020 KYOCERA Corporation
+ */
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
  * Copyright (c) 2017-2019 The Linux Foundation. All rights reserved.
@@ -14,6 +18,7 @@ struct step_chg_jeita_param {
 	int			rise_hys;
 	int			fall_hys;
 	bool			use_bms;
+	int			number_of_steps;
 };
 
 struct range_data {

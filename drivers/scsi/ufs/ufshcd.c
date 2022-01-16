@@ -44,6 +44,7 @@
 #include <linux/bitfield.h>
 #include <linux/blkdev.h>
 #include <linux/suspend.h>
+#include <linux/device.h>
 #include "ufshcd.h"
 #include "ufs_quirks.h"
 #include "unipro.h"
@@ -715,6 +716,23 @@ static void __ufshcd_cmd_log(struct ufs_hba *hba, char *str, char *cmd_type,
 			(hba->cmd_log.pos + 1) % UFSHCD_MAX_CMD_LOGGING;
 
 	ufshcd_add_command_trace(hba, entry);
+
+	if( console_log_flag_getter(CONSOLE_LOG_FLAG_UFS) ){
+		pr_notice("LOGFLG[0x%02X] %s: %s: seq_no=%u lun=0x%x cmd_id=0x%02x lba=0x%llx txfer_len=%d tag=%u, doorbell=0x%x outstanding=0x%x idn=%d time=%lld us\n",
+			console_log_flag_getter(0xFF),	/* echo FLAG value */
+			entry->cmd_type,
+			entry->str,
+			entry->seq_num,
+			entry->lun,
+			entry->cmd_id,
+			(unsigned long long)entry->lba,
+			entry->transfer_len,
+			entry->tag,
+			entry->doorbell,
+			entry->outstanding_reqs,
+			entry->idn,
+			ktime_to_us(entry->tstamp));
+	}
 }
 
 static void ufshcd_cmd_log(struct ufs_hba *hba, char *str, char *cmd_type,

@@ -9,6 +9,12 @@
  *                    Author: Michal Nazarewicz (mina86@mina86.com)
  */
 
+/*
+ * This software is contributed or developed by KYOCERA Corporation.
+ * (C) 2018 KYOCERA Corporation
+ * (C) 2020 KYOCERA Corporation
+ */
+
 /* #define VERBOSE_DEBUG */
 
 #include <linux/slab.h>
@@ -24,6 +30,8 @@
 #include "u_rndis.h"
 #include "rndis.h"
 #include "configfs.h"
+
+#include <linux/soc/qcom/smem.h>
 
 /*
  * This function is an RNDIS Ethernet port -- a Microsoft protocol that's
@@ -366,6 +374,49 @@ static struct usb_gadget_strings *rndis_strings[] = {
 };
 
 /*-------------------------------------------------------------------------*/
+
+static void set_eth_addr(unsigned char *eth_addr, unsigned char *smem)
+{
+	u64 num = 0;
+	int i;
+
+	for (i = 0 ; i < 6 ; i++) {
+		num *= 10;
+		num += smem[i + 2] >> 4 & 0x0f;
+		num *= 10;
+		num += smem[i + 3] & 0x0f;
+	}
+
+	eth_addr[0] = 0x06;
+	for (i = 5 ; i > 0 ; i-- ){
+		eth_addr[i] =(char)( num & 0xff );
+		num >>= 8;
+	}
+
+	return;
+}
+
+static int android_set_imacaddr(unsigned char *eth_addr)
+{
+	static char *usb_imei = NULL;
+
+	if (!eth_addr)
+		return -EINVAL;
+
+	usb_imei = (char*)kc_smem_alloc(SMEM_IMEI, 9);
+
+	if (usb_imei != NULL && usb_imei[0] == 0x08) {
+		set_eth_addr(eth_addr, usb_imei);
+	} else {
+		eth_addr[0]=0x06;
+		eth_addr[1]=0x11;
+		eth_addr[2]=0x22;
+		eth_addr[3]=0x33;
+		eth_addr[4]=0x44;
+		eth_addr[5]=0x55;
+	}
+	return 0;
+}
 
 static struct sk_buff *rndis_add_header(struct gether *port,
 					struct sk_buff *skb)
@@ -1006,6 +1057,12 @@ static struct usb_function *rndis_alloc(struct usb_function_instance *fi)
 	opts->refcnt++;
 
 	gether_get_host_addr_u8(opts->net, rndis->ethaddr);
+
+	android_set_imacaddr(rndis->ethaddr);
+	pr_debug("%s MAC: %02X:%02X:%02X:%02X:%02X:%02X\n", __func__,
+		rndis->ethaddr[0], rndis->ethaddr[1], rndis->ethaddr[2],
+		rndis->ethaddr[3], rndis->ethaddr[4], rndis->ethaddr[5]);
+
 	rndis->vendorID = opts->vendor_id;
 	rndis->manufacturer = opts->manufacturer;
 

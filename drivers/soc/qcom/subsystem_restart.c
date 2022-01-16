@@ -2,6 +2,10 @@
 /*
  * Copyright (c) 2011-2020, The Linux Foundation. All rights reserved.
  */
+/*
+ * This software is contributed or developed by KYOCERA Corporation.
+ * (C) 2020 KYOCERA Corporation
+ */
 
 #define pr_fmt(fmt) "subsys-restart: %s(): " fmt, __func__
 
@@ -24,6 +28,8 @@
 #include <linux/interrupt.h>
 #include <linux/cdev.h>
 #include <linux/platform_device.h>
+#include <linux/kcjlog.h>
+#include <linux/crash_reason.h>
 #include <soc/qcom/subsystem_restart.h>
 #include <soc/qcom/subsystem_notif.h>
 #include <soc/qcom/sysmon.h>
@@ -440,10 +446,10 @@ found:
 	return order;
 }
 
-static int max_restarts;
+static int max_restarts = 2;
 module_param(max_restarts, int, 0644);
 
-static long max_history_time = 3600;
+static long max_history_time = 40;
 module_param(max_history_time, long, 0644);
 
 static void do_epoch_check(struct subsys_device *dev)
@@ -1134,6 +1140,11 @@ static void subsystem_restart_wq_func(struct work_struct *work)
 	spin_lock_irqsave(&track->s_lock, flags);
 	track->p_state = SUBSYS_RESTARTING;
 	spin_unlock_irqrestore(&track->s_lock, flags);
+
+	subsys_notice_kerr();
+
+	set_kcj_crash_info();
+	dump_kcj_log();
 
 	/* Collect ram dumps for all subsystems in order here */
 	for_each_subsys_device(list, count, NULL, subsystem_ramdump);
@@ -1970,6 +1981,8 @@ static int subsys_panic(struct device *dev, void *data)
 static int ssr_panic_handler(struct notifier_block *this,
 				unsigned long event, void *ptr)
 {
+	set_smem_kcjlog(SYSTEM_KERNEL, KIND_PANIC);
+	set_smem_crash_info_data(" ");
 	bus_for_each_dev(&subsys_bus_type, NULL, NULL, subsys_panic);
 	return NOTIFY_DONE;
 }

@@ -2,6 +2,11 @@
 /*
  * Copyright (c) 2013-2020, The Linux Foundation. All rights reserved.
  */
+/*
+ * This software is contributed or developed by KYOCERA Corporation.
+ * (C) 2020 KYOCERA Corporation
+ * (C) 2021 KYOCERA Corporation
+ */
 
 #include <linux/module.h>
 #include <linux/kernel.h>
@@ -342,8 +347,12 @@ static int configure_phy_regs(struct usb_phy *uphy,
 
 	while (reg->offset != -1) {
 		writel_relaxed(reg->val, phy->base + reg->offset);
+
 		if (reg->delay)
 			usleep_range(reg->delay, reg->delay + 10);
+
+		pr_debug("(ssusb) read 0x%02x = 0x%02x\n", reg->offset, readb_relaxed(phy->base + reg->offset));
+
 		reg++;
 	}
 	return 0;

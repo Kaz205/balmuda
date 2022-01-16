@@ -1,4 +1,8 @@
 /* SPDX-License-Identifier: GPL-2.0 */
+/*
+ * This software is contributed or developed by KYOCERA Corporation.
+ * (C) 2020 KYOCERA Corporation
+ */
 #ifndef __KERNEL_PRINTK__
 #define __KERNEL_PRINTK__
 
@@ -209,6 +213,9 @@ void show_regs_print_info(const char *log_lvl);
 extern asmlinkage void dump_stack(void) __cold;
 extern void printk_safe_flush(void);
 extern void printk_safe_flush_on_panic(void);
+u32* log_buf_len_addr_get(void);
+u32* log_first_idx_addr_get(void);
+u32* log_next_idx_addr_get(void);
 #else
 static inline __printf(1, 0)
 int vprintk(const char *s, va_list args)

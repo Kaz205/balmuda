@@ -27,12 +27,16 @@ subdir-y += ti
 subdir-y += xilinx
 subdir-y += zte
 
-
 dtstree		:= $(srctree)/$(src)
 
 vendor := $(dtstree)/vendor
 ifneq "$(wildcard $(vendor)/Makefile)" ""
         subdir-y += vendor
+endif
+
+kyocera := $(dtstree)/kyocera
+ifneq "$(wildcard $(kyocera)/Makefile)" ""
+        subdir-y += kyocera
 endif
 
 dtb-$(CONFIG_OF_ALL_DTBS) := $(patsubst $(dtstree)/%.dts,%.dtb, $(foreach d,$(subdir), $(wildcard $(dtstree)/$(d)/*.dts)))

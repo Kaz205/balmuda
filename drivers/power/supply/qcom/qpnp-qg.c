@@ -1,3 +1,7 @@
+/*
+ * This software is contributed or developed by KYOCERA Corporation.
+ * (C) 2020 KYOCERA Corporation
+ */
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2018-2020 The Linux Foundation. All rights reserved.
@@ -36,6 +40,9 @@
 #include "qg-soc.h"
 #include "qg-battery-profile.h"
 #include "qg-defs.h"
+
+#include <soc/qcom/oem_fact.h>
+#include <linux/soc/qcom/smem.h>
 
 static int qg_debug_mask;
 
@@ -96,6 +103,15 @@ ATTRIBUTE_GROUPS(qg);
 
 static int qg_process_rt_fifo(struct qpnp_qg *chip);
 static int qg_load_battery_profile(struct qpnp_qg *chip);
+
+/*-------*/
+static int oem_bms_get_deterioration_status(struct qpnp_qg *chip);
+static int oem_smem_param_init(struct qpnp_qg *chip);
+static int oem_cycle_count_check(struct qpnp_qg *chip);
+static int oem_cont_chg_check(struct qpnp_qg *chip);
+static void oem_online_time_work(struct work_struct *work);
+static int oem_control_batt_care_param(struct qpnp_qg *chip);
+/*-------*/
 
 static bool is_battery_present(struct qpnp_qg *chip)
 {
@@ -2094,8 +2110,12 @@ static int qg_psy_set_property(struct power_supply *psy,
 {
 	struct qpnp_qg *chip = power_supply_get_drvdata(psy);
 	int rc = 0;
+	union power_supply_propval prop = {0, };
 
 	switch (psp) {
+	case POWER_SUPPLY_PROP_VOLTAGE_MAX:
+		chip->bp.float_volt_uv = pval->intval;
+		break;
 	case POWER_SUPPLY_PROP_CHARGE_FULL:
 		if (chip->dt.cl_disable) {
 			pr_warn("Capacity learning disabled!\n");
@@ -2134,6 +2154,21 @@ static int qg_psy_set_property(struct power_supply *psy,
 	case POWER_SUPPLY_PROP_BATT_AGE_LEVEL:
 		rc = qg_setprop_batt_age_level(chip, pval->intval);
 		break;
+	case POWER_SUPPLY_PROP_OEM_BATT_CHG_ENABLED:
+		if (chip->profile_loaded && chip->batt_psy) {
+			prop.intval = pval->intval;
+			rc = power_supply_set_property(chip->batt_psy,
+					POWER_SUPPLY_PROP_OEM_BATT_CHG_ENABLED, &prop);
+			chip->oem_batt_chg_enabled = pval->intval;
+		}
+		break;
+	case POWER_SUPPLY_PROP_BATTERY_CARE_MODE:
+		chip->oem_batt_care_mode = pval->intval;
+		rc = oem_control_batt_care_param(chip);
+		break;
+	case POWER_SUPPLY_PROP_BATTERY_CARE_NOTIFICATION:
+		chip->oem_batt_care_notification = pval->intval;
+		break;
 	default:
 		break;
 	}
@@ -2153,6 +2188,8 @@ static int qg_psy_get_property(struct power_supply *psy,
 	switch (psp) {
 	case POWER_SUPPLY_PROP_CAPACITY:
 		rc = qg_get_battery_capacity(chip, &pval->intval);
+		pval->intval = min(pval->intval, FULL_SOC);
+		pval->intval = max(pval->intval, EMPTY_SOC);
 		break;
 	case POWER_SUPPLY_PROP_CAPACITY_RAW:
 		pval->intval = chip->sys_soc;
@@ -2278,6 +2315,30 @@ static int qg_psy_get_property(struct power_supply *psy,
 	case POWER_SUPPLY_PROP_FG_TYPE:
 		pval->intval = chip->qg_mode;
 		break;
+	case POWER_SUPPLY_PROP_OEM_BMS_BATT_STATUS:
+		pval->intval = oem_bms_get_deterioration_status(chip);
+		break;
+	case POWER_SUPPLY_PROP_OEM_BMS_FACT_SETTING:
+		pval->intval = oem_fact_get_option_bit(OEM_FACT_OPTION_ITEM_01, 6);
+		break;
+	case POWER_SUPPLY_PROP_OEM_BATT_CHG_ENABLED:
+		pval->intval = chip->oem_batt_chg_enabled;
+		break;
+	case POWER_SUPPLY_PROP_BATTERY_CARE_MODE:
+		pval->intval = chip->oem_batt_care_mode;
+		break;
+	case POWER_SUPPLY_PROP_BATTERY_CARE_NOTIFICATION:
+		pval->intval = chip->oem_batt_care_notification;
+		break;
+	case POWER_SUPPLY_PROP_OEM_CYCLE_COUNT:
+		pval->intval = chip->oem_cycle.count;
+		break;
+	case POWER_SUPPLY_PROP_OEM_CYCLE_INCREASE:
+		pval->intval = chip->oem_cycle.increase_soc;
+		break;
+	case POWER_SUPPLY_PROP_OEM_ONLINE_TIME:
+		pval->intval = chip->oem_online.total_time;
+		break;
 	default:
 		pr_debug("Unsupported property %d\n", psp);
 		break;
@@ -2290,12 +2351,16 @@ static int qg_property_is_writeable(struct power_supply *psy,
 				enum power_supply_property psp)
 {
 	switch (psp) {
+	case POWER_SUPPLY_PROP_VOLTAGE_MAX:
 	case POWER_SUPPLY_PROP_CHARGE_FULL:
 	case POWER_SUPPLY_PROP_ESR_ACTUAL:
 	case POWER_SUPPLY_PROP_ESR_NOMINAL:
 	case POWER_SUPPLY_PROP_SOH:
 	case POWER_SUPPLY_PROP_FG_RESET:
 	case POWER_SUPPLY_PROP_BATT_AGE_LEVEL:
+	case POWER_SUPPLY_PROP_OEM_BATT_CHG_ENABLED:
+	case POWER_SUPPLY_PROP_BATTERY_CARE_MODE:
+	case POWER_SUPPLY_PROP_BATTERY_CARE_NOTIFICATION:
 		return 1;
 	default:
 		break;
@@ -2343,6 +2408,14 @@ static enum power_supply_property qg_psy_props[] = {
 	POWER_SUPPLY_PROP_SCALE_MODE_EN,
 	POWER_SUPPLY_PROP_BATT_AGE_LEVEL,
 	POWER_SUPPLY_PROP_FG_TYPE,
+	POWER_SUPPLY_PROP_OEM_BMS_BATT_STATUS,
+	POWER_SUPPLY_PROP_OEM_BMS_FACT_SETTING,
+	POWER_SUPPLY_PROP_OEM_BATT_CHG_ENABLED,
+	POWER_SUPPLY_PROP_BATTERY_CARE_MODE,
+	POWER_SUPPLY_PROP_BATTERY_CARE_NOTIFICATION,
+	POWER_SUPPLY_PROP_OEM_CYCLE_COUNT,
+	POWER_SUPPLY_PROP_OEM_CYCLE_INCREASE,
+	POWER_SUPPLY_PROP_OEM_ONLINE_TIME,
 };
 
 static const struct power_supply_desc qg_psy_desc = {
@@ -2397,7 +2470,10 @@ static int qg_charge_full_update(struct qpnp_qg *chip)
 				chip->msoc, health, chip->charge_full,
 				chip->charge_done);
 	if (chip->charge_done && !chip->charge_full) {
-		if (chip->msoc >= 99 && health == POWER_SUPPLY_HEALTH_GOOD) {
+		if (chip->msoc >= 1 &&
+				(health == POWER_SUPPLY_HEALTH_GOOD ||
+				health == POWER_SUPPLY_HEALTH_WARM ||
+				health == POWER_SUPPLY_HEALTH_COOL)) {
 			chip->charge_full = true;
 			qg_dbg(chip, QG_DEBUG_STATUS, "Setting charge_full (0->1) @ msoc=%d\n",
 					chip->msoc);
@@ -2646,6 +2722,7 @@ static void qg_status_change_work(struct work_struct *work)
 	union power_supply_propval prop = {0, };
 	int rc = 0, batt_temp = 0;
 	bool input_present = false;
+	static int last_status = POWER_SUPPLY_STATUS_UNKNOWN;
 
 	if (!is_batt_available(chip)) {
 		pr_debug("batt-psy not available\n");
@@ -2711,6 +2788,18 @@ static void qg_status_change_work(struct work_struct *work)
 		pr_err("Failed in charge_full_update, rc=%d\n", rc);
 
 	ttf_update(chip->ttf, input_present);
+
+	if (last_status != chip->charge_status) {
+		last_status = chip->charge_status;
+
+		if (chip->bp.oem_cycle_count_levels > 0) {
+			rc = oem_cycle_count_check(chip);
+		}
+
+		if (chip->bp.oem_cont_chg_levels > 0) {
+			rc = oem_cont_chg_check(chip);
+		}
+	}
 out:
 	pm_relax(chip->dev);
 }
@@ -2994,6 +3083,7 @@ static int qg_load_battery_profile(struct qpnp_qg *chip)
 	struct device_node *node = chip->dev->of_node;
 	struct device_node *profile_node;
 	int rc, tuple_len, len, i, avail_age_level = 0;
+	int byte_len;
 
 	chip->batt_node = of_find_node_by_name(node, "qcom,battery-data");
 	if (!chip->batt_node) {
@@ -3050,6 +3140,7 @@ static int qg_load_battery_profile(struct qpnp_qg *chip)
 		pr_err("Failed to read battery float-voltage rc:%d\n", rc);
 		chip->bp.float_volt_uv = -EINVAL;
 	}
+	chip->bp.oem_float_volt_uv_design = chip->bp.float_volt_uv;
 
 	rc = of_property_read_u32(profile_node, "qcom,fastchg-current-ma",
 				&chip->bp.fastchg_curr_ma);
@@ -3128,6 +3219,192 @@ static int qg_load_battery_profile(struct qpnp_qg *chip)
 				chip->ttf->step_chg_cfg[i].high_threshold,
 				chip->ttf->step_chg_cfg[i].value);
 		}
+	}
+
+	rc = of_property_read_u32(profile_node, "oem,batt-capacity-mah",
+				&chip->bp.oem_batt_capacity_mah);
+	if (rc < 0) {
+		pr_err("Failed to read QG profile version rc:%d\n", rc);
+		chip->bp.oem_batt_capacity_mah = -EINVAL;
+	}
+
+	rc = of_property_read_u32(profile_node, "oem,deterioration-thresh-good",
+				&chip->bp.oem_deterioration_thresh_good);
+	if (rc < 0) {
+		pr_err("deterioration thresh good unavailable, rc:%d\n", rc);
+		chip->bp.oem_deterioration_thresh_good = -EINVAL;
+	}
+
+	rc = of_property_read_u32(profile_node, "oem,deterioration-thresh-norm",
+				&chip->bp.oem_deterioration_thresh_norm);
+	if (rc < 0) {
+		pr_err("deterioration thresh norm unavailable, rc:%d\n", rc);
+		chip->bp.oem_deterioration_thresh_norm = -EINVAL;
+	}
+
+	rc = of_property_read_u32(profile_node, "oem,deterioration-thresh-normtogood",
+				&chip->bp.oem_deterioration_thresh_normtogood);
+	if (rc < 0) {
+		pr_err("deterioration thresh norm to good unavailable, rc:%d\n", rc);
+		chip->bp.oem_deterioration_thresh_normtogood = -EINVAL;
+	}
+
+	rc = of_property_read_u32(profile_node, "oem,deterioration-thresh-deadtonorm",
+				&chip->bp.oem_deterioration_thresh_deadtonorm);
+	if (rc < 0) {
+		pr_err("deterioration thresh dead to norm unavailable, rc:%d\n", rc);
+		chip->bp.oem_deterioration_thresh_deadtonorm = -EINVAL;
+	}
+
+	if (of_find_property(profile_node, "oem,cycle-count-thresh", &byte_len)) {
+		chip->bp.oem_cycle_count_thresh = devm_kzalloc(chip->dev, byte_len,
+			GFP_KERNEL);
+
+		if (chip->bp.oem_cycle_count_thresh == NULL) {
+			pr_err("Couldn't read cycle_count_thresh rc = %d\n", rc);
+			chip->bp.oem_cycle_count_levels = -EINVAL;
+		} else {
+			chip->bp.oem_cycle_count_levels = byte_len / sizeof(u32);
+			rc = of_property_read_u32_array(profile_node,
+					"oem,cycle-count-thresh",
+					chip->bp.oem_cycle_count_thresh,
+					chip->bp.oem_cycle_count_levels);
+			if (rc < 0) {
+				pr_err("Couldn't cycle_count_thresh limits rc = %d\n", rc);
+				chip->bp.oem_cycle_count_levels = -EINVAL;
+			}
+		}
+	}
+
+	if (of_find_property(profile_node, "oem,cycle-count-voltage-comp-mv", &byte_len) &&
+			chip->bp.oem_cycle_count_levels > 0) {
+		chip->bp.oem_cycle_count_fv_comp_mv = devm_kzalloc(chip->dev, byte_len,
+			GFP_KERNEL);
+
+		if (chip->bp.oem_cycle_count_fv_comp_mv == NULL) {
+			pr_err("Couldn't read cycle_count_fv_comp rc = %d\n", rc);
+			chip->bp.oem_cycle_count_levels = -EINVAL;
+		} else {
+			chip->bp.oem_cycle_count_levels = byte_len / sizeof(u32);
+			rc = of_property_read_u32_array(profile_node,
+					"oem,cycle-count-voltage-comp-mv",
+					chip->bp.oem_cycle_count_fv_comp_mv,
+					chip->bp.oem_cycle_count_levels);
+			if (rc < 0) {
+				pr_err("Couldn't cycle_count_fv_comp limits rc = %d\n", rc);
+				chip->bp.oem_cycle_count_levels = -EINVAL;
+			}
+		}
+	}
+
+	if (of_find_property(profile_node, "oem,cont-chg-thresh", &byte_len)) {
+		chip->bp.oem_cont_chg_thresh = devm_kzalloc(chip->dev, byte_len,
+			GFP_KERNEL);
+
+		if (chip->bp.oem_cont_chg_thresh == NULL) {
+			pr_err("Couldn't read cont_chg_thresh rc = %d\n", rc);
+			chip->bp.oem_cont_chg_levels = -EINVAL;
+		} else {
+			chip->bp.oem_cont_chg_levels = byte_len / sizeof(u32);
+			rc = of_property_read_u32_array(profile_node,
+					"oem,cont-chg-thresh",
+					chip->bp.oem_cont_chg_thresh,
+					chip->bp.oem_cont_chg_levels);
+			if (rc < 0) {
+				pr_err("Couldn't cont_chg_thresh limits rc = %d\n", rc);
+				chip->bp.oem_cont_chg_levels = -EINVAL;
+			}
+		}
+	}
+
+	if (of_find_property(profile_node, "oem,cont-chg-voltage-comp-mv", &byte_len) &&
+			chip->bp.oem_cont_chg_levels > 0) {
+		chip->bp.oem_cont_chg_fv_comp_mv = devm_kzalloc(chip->dev, byte_len,
+			GFP_KERNEL);
+
+		if (chip->bp.oem_cont_chg_fv_comp_mv == NULL) {
+			pr_err("Couldn't read cont_chg_fv_comp rc = %d\n", rc);
+			chip->bp.oem_cont_chg_levels = -EINVAL;
+		} else {
+			chip->bp.oem_cont_chg_levels = byte_len / sizeof(u32);
+			rc = of_property_read_u32_array(profile_node,
+					"oem,cont-chg-voltage-comp-mv",
+					chip->bp.oem_cont_chg_fv_comp_mv,
+					chip->bp.oem_cont_chg_levels);
+			if (rc < 0) {
+				pr_err("Couldn't cont_chg_fv_comp limits rc = %d\n", rc);
+				chip->bp.oem_cont_chg_levels = -EINVAL;
+			}
+		}
+	}
+
+	if (of_find_property(profile_node, "oem,batt-temp-thresh", &byte_len)) {
+		chip->bp.oem_batt_temp_thresh = devm_kzalloc(chip->dev, byte_len,
+			GFP_KERNEL);
+
+		if (chip->bp.oem_batt_temp_thresh == NULL) {
+			pr_err("Couldn't read batt_temp_thresh rc = %d\n", rc);
+			chip->bp.oem_cont_chg_factor_levels = -EINVAL;
+		} else {
+			chip->bp.oem_cont_chg_factor_levels = byte_len / sizeof(u32);
+			rc = of_property_read_u32_array(profile_node,
+					"oem,batt-temp-thresh",
+					chip->bp.oem_batt_temp_thresh,
+					chip->bp.oem_cont_chg_factor_levels);
+			if (rc < 0) {
+				pr_err("Couldn't cont_chg_factor limits rc = %d\n", rc);
+				chip->bp.oem_cont_chg_factor_levels = -EINVAL;
+			}
+		}
+	}
+
+	if (of_find_property(profile_node, "oem,cont-chg-factor", &byte_len)&&
+			chip->bp.oem_cont_chg_factor_levels > 0) {
+		chip->bp.oem_cont_chg_factor = devm_kzalloc(chip->dev, byte_len,
+			GFP_KERNEL);
+
+		if (chip->bp.oem_cont_chg_factor == NULL) {
+			pr_err("Couldn't read cont_chg_factor rc = %d\n", rc);
+			chip->bp.oem_cont_chg_factor_levels = -EINVAL;
+		} else {
+			chip->bp.oem_cont_chg_factor_levels = byte_len / sizeof(u32);
+			rc = of_property_read_u32_array(profile_node,
+					"oem,cont-chg-factor",
+					chip->bp.oem_cont_chg_factor,
+					chip->bp.oem_cont_chg_factor_levels);
+			if (rc < 0) {
+				pr_err("Couldn't cont_chg_factor limits rc = %d\n", rc);
+				chip->bp.oem_cont_chg_factor_levels = -EINVAL;
+			}
+		}
+	}
+
+	if (of_find_property(profile_node, "oem,cont-chg-factor-batt-care", &byte_len)&&
+			chip->bp.oem_cont_chg_factor_levels > 0) {
+		chip->bp.oem_cont_chg_factor_batt_care = devm_kzalloc(chip->dev, byte_len,
+			GFP_KERNEL);
+
+		if (chip->bp.oem_cont_chg_factor_batt_care == NULL) {
+			pr_err("Couldn't read cont_chg_factor rc = %d\n", rc);
+			chip->bp.oem_cont_chg_factor_levels = -EINVAL;
+		} else {
+			chip->bp.oem_cont_chg_factor_levels = byte_len / sizeof(u32);
+			rc = of_property_read_u32_array(profile_node,
+					"oem,cont-chg-factor-batt-care",
+					chip->bp.oem_cont_chg_factor_batt_care,
+					chip->bp.oem_cont_chg_factor_levels);
+			if (rc < 0) {
+				pr_err("Couldn't cont_chg_factor limits rc = %d\n", rc);
+				chip->bp.oem_cont_chg_factor_levels = -EINVAL;
+			}
+		}
+	}
+
+	rc = of_property_read_u32(profile_node, "oem,batt-care-max-voltage-uv",
+				&chip->oem_batt_care_float_volt_uv);
+	if (rc < 0) {
+		pr_err("Failed to read QG profile version rc:%d\n", rc);
+		chip->oem_batt_care_float_volt_uv = chip->bp.oem_float_volt_uv_design;
 	}
 
 	qg_dbg(chip, QG_DEBUG_PROFILE, "profile=%s FV=%duV FCC=%dma\n",
@@ -4298,6 +4575,14 @@ static int qg_parse_dt(struct qpnp_qg *chip)
 	else
 		chip->dt.iterm_ma = temp;
 
+#ifdef CONFIG_OEM_WIRELESS_CHARGER
+	rc = of_property_read_u32(node, "oem,qg-iterm-ma-wchg", &temp);
+	if (rc < 0)
+		chip->dt.iterm_ma_wchg = DEFAULT_ITERM_MA;
+	else
+		chip->dt.iterm_ma_wchg = temp;
+#endif
+
 	rc = of_property_read_u32(node, "qcom,delta-soc", &temp);
 	if (rc < 0)
 		chip->dt.delta_soc = DEFAULT_DELTA_SOC;
@@ -4672,6 +4957,316 @@ static const struct dev_pm_ops qpnp_qg_pm_ops = {
 	.resume		= qpnp_qg_resume,
 };
 
+/*-------*/
+enum {
+	DETERIORATION_STATUS_GOOD,
+	DETERIORATION_STATUS_NORM,
+	DETERIORATION_STATUS_DEAD,
+	DETERIORATION_STATUS_INIT
+};
+
+static int oem_bms_get_deterioration_status(struct qpnp_qg *chip)
+{
+	static int deterioration_status = DETERIORATION_STATUS_INIT;
+	int rc;
+	int64_t learned_capacity = 0;
+	int deterioration_degree;
+	int new_deterioration_status;
+
+	if (!chip->profile_loaded) {
+		pr_info("profile is not ready. return default value.\n");
+		return DETERIORATION_STATUS_GOOD;
+	}
+
+	rc = qg_get_learned_capacity(chip, &learned_capacity);
+	if (rc < 0 || !learned_capacity) {
+		pr_info("learned capacity is not read. return default value.\n");
+		return DETERIORATION_STATUS_GOOD;
+	}
+
+	deterioration_degree = (int)((learned_capacity * 100) / (chip->bp.oem_batt_capacity_mah * 1000));
+
+	pr_debug("deterioration_degree:%d learned_cc_uah:%lld FULL_CC_UAH:%d\n",
+		deterioration_degree, learned_capacity, chip->bp.oem_batt_capacity_mah * 1000);
+
+	switch (deterioration_status) {
+	case DETERIORATION_STATUS_INIT:
+		if (deterioration_degree >= chip->bp.oem_deterioration_thresh_good) {
+			new_deterioration_status = DETERIORATION_STATUS_GOOD;
+		}
+		else if (deterioration_degree >= chip->bp.oem_deterioration_thresh_norm) {
+			new_deterioration_status = DETERIORATION_STATUS_NORM;
+		}
+		else {
+			new_deterioration_status = DETERIORATION_STATUS_DEAD;
+		}
+		break;
+	case DETERIORATION_STATUS_GOOD:
+		if (deterioration_degree >= chip->bp.oem_deterioration_thresh_good) {
+			new_deterioration_status = DETERIORATION_STATUS_GOOD;
+		}
+		else {
+			new_deterioration_status = DETERIORATION_STATUS_NORM;
+		}
+		break;
+	case DETERIORATION_STATUS_NORM:
+		if (deterioration_degree >= chip->bp.oem_deterioration_thresh_normtogood) {
+			new_deterioration_status = DETERIORATION_STATUS_GOOD;
+		}
+		else if (deterioration_degree >= chip->bp.oem_deterioration_thresh_norm) {
+			new_deterioration_status = DETERIORATION_STATUS_NORM;
+		}
+		else {
+			new_deterioration_status = DETERIORATION_STATUS_DEAD;
+		}
+		break;
+	case DETERIORATION_STATUS_DEAD:
+		if (deterioration_degree >= chip->bp.oem_deterioration_thresh_deadtonorm) {
+			new_deterioration_status = DETERIORATION_STATUS_NORM;
+		}
+		else {
+			new_deterioration_status = DETERIORATION_STATUS_DEAD;
+		}
+		break;
+	default:
+		pr_err("invalid deterioration_status:%d\n", deterioration_status);
+		new_deterioration_status = DETERIORATION_STATUS_GOOD;
+		break;
+	}
+
+	if (deterioration_status != new_deterioration_status) {
+		pr_info("deterioration_status %d -> %d\n", deterioration_status, new_deterioration_status);
+		deterioration_status = new_deterioration_status;
+	}
+	return deterioration_status;
+}
+
+static int oem_smem_param_init(struct qpnp_qg *chip)
+{
+	int rc = 0;
+	unsigned char *smem_ptr = NULL;
+	int buffer[4];
+
+	smem_ptr = kc_smem_alloc(SMEM_CHG_PARAM, DNAND_CHG_CYCLE_SIZE);
+	if (smem_ptr) {
+		buffer[0] = (int)(*(smem_ptr + DNAND_OFFSET_CYCLE_COUNT) & 0xFF);
+		buffer[1] = (int)(*(smem_ptr + DNAND_OFFSET_CYCLE_COUNT+1) & 0xFF);
+		chip->oem_cycle.count = (buffer[1] << 8 | buffer[0]);
+
+		chip->oem_cycle.increase_soc = (int)(*(smem_ptr + DNAND_OFFSET_CYC_CTR_CHG_INC) & 0xFF);
+
+		buffer[0] = (int)(*(smem_ptr + DNAND_OFFSET_TOTAL_CONNECT_TIME) & 0xFF);
+		buffer[1] = (int)(*(smem_ptr + DNAND_OFFSET_TOTAL_CONNECT_TIME+1) & 0xFF);
+		buffer[2] = (int)(*(smem_ptr + DNAND_OFFSET_TOTAL_CONNECT_TIME+2) & 0xFF);
+		buffer[3] = (int)(*(smem_ptr + DNAND_OFFSET_TOTAL_CONNECT_TIME+3) & 0xFF);
+		chip->oem_online.total_time = (buffer[3] << 24 | buffer[2] << 16 | buffer[1] << 8 | buffer[0]);
+
+		chip->oem_batt_care_mode = (int)(*(smem_ptr + DNAND_OFFSET_BATT_CARE_MODE) & 0xFF);
+	}
+
+	pr_info("smem read complete. cycle_count=%d, increase_soc=%d, total_time=%d, batt_care_mode=%d\n",
+			chip->oem_cycle.count, chip->oem_cycle.increase_soc, chip->oem_online.total_time, chip->oem_batt_care_mode);
+
+	return rc;
+}
+
+static void oem_thresh_check(struct qpnp_qg *chip, int type)
+{
+	static bool find_fv_flag = false;
+	int i = 0;
+
+	if (!chip->profile_loaded) {
+		pr_info("profile is not ready.\n");
+		goto out;
+	}
+
+	if (!find_fv_flag && !chip->fv_votable) {
+		find_fv_flag = true;
+		chip->fv_votable = find_votable("FV");
+	}
+	if (!chip->fv_votable) {
+		find_fv_flag = false;
+		pr_err("Couldn't find FV votable\n");
+		goto out;
+	}
+
+	switch (type) {
+	case CYCLE_COUNT:
+		for (i = (chip->bp.oem_cycle_count_levels - 1); i >= 0; i--) {
+			if (chip->oem_cycle.count >= chip->bp.oem_cycle_count_thresh[i]) {
+				vote(chip->fv_votable, CYCLE_COUNT_VOTER, true, chip->bp.oem_float_volt_uv_design - (chip->bp.oem_cycle_count_fv_comp_mv[i] * 1000));
+				break;
+			}
+		}
+		break;
+
+	case CONT_CHG:
+		for (i = (chip->bp.oem_cont_chg_levels - 1); i >= 0; i--) {
+			if (chip->oem_online.total_time >= chip->bp.oem_cont_chg_thresh[i]) {
+				vote(chip->fv_votable, CONT_CHG_VOTER, true, chip->bp.oem_float_volt_uv_design - (chip->bp.oem_cont_chg_fv_comp_mv[i] * 1000));
+				break;
+			}
+		}
+		break;
+
+	default:
+		break;
+	}
+
+out:
+	return;
+}
+
+static int oem_cycle_count_update(struct qpnp_qg *chip)
+{
+	int rc = 0;
+
+	chip->oem_cycle.last_soc = chip->msoc;
+
+	if (chip->oem_cycle.start_soc >= chip->oem_cycle.last_soc) {
+		pr_err("soc is lower than the start\n");
+		goto out;
+	}
+
+	chip->oem_cycle.increase_soc += (chip->oem_cycle.last_soc - chip->oem_cycle.start_soc);
+	if (chip->oem_cycle.increase_soc > 100) {
+		pr_info("cycle_count increase, increase_soc=%d\n", chip->oem_cycle.increase_soc);
+		chip->oem_cycle.count++;
+		chip->oem_cycle.increase_soc %= 100;
+	}
+
+out:
+	pr_debug("start_soc=%d, last_soc=%d, increase_soc=%d\n",
+			chip->oem_cycle.start_soc, chip->oem_cycle.last_soc, chip->oem_cycle.increase_soc);
+	return rc;
+}
+
+static int oem_cycle_count_check(struct qpnp_qg *chip)
+{
+	int rc = 0;
+
+	if (chip->charge_status == POWER_SUPPLY_STATUS_CHARGING) {
+		if (!chip->oem_cycle.start_soc) {
+			chip->oem_cycle.start_soc = chip->msoc;
+		}
+	} else {
+		if (chip->oem_cycle.start_soc) {
+			rc = oem_cycle_count_update(chip);
+		}
+		chip->oem_cycle.start_soc = 0;
+
+		oem_thresh_check(chip, CYCLE_COUNT);
+	}
+
+	return rc;
+}
+
+static int oem_cont_chg_check(struct qpnp_qg *chip)
+{
+	static int last_total_time;
+	int rc = 0;
+
+	if (chip->charge_status == POWER_SUPPLY_STATUS_CHARGING) {
+		schedule_delayed_work(&chip->oem_online_time_work, msecs_to_jiffies(ONLINE_TIME_CHECK_CYCLE));
+	} else if (chip->charge_status != POWER_SUPPLY_STATUS_FULL) {
+		cancel_delayed_work_sync(&chip->oem_online_time_work);
+
+		last_total_time = chip->oem_online.total_time;
+
+		oem_thresh_check(chip, CONT_CHG);
+	}
+
+	return rc;
+}
+
+static void oem_online_time_work(struct work_struct *work)
+{
+	struct qpnp_qg *chip = container_of(work, struct qpnp_qg,
+					    oem_online_time_work.work);
+	int i, rc = 0;
+	int check_capacity = TIME_CHECK_CAPACITY;
+	int batt_temp = 0;
+	int factor_cont_chg = 0;
+
+	if (!is_usb_present(chip)) {
+		pr_info("Non-online of charger was detected\n");
+		goto exit;
+	}
+
+	if (chip->msoc < check_capacity) {
+		pr_info("Low capacity was detected\n");
+		goto next_work;
+	}
+
+	rc = qg_get_battery_temp(chip, &batt_temp);
+	if (rc < 0) {
+		pr_err("Failed to get battery-temp, rc = %d\n", rc);
+		goto next_work;
+	}
+
+	for (i = (chip->bp.oem_cont_chg_factor_levels - 1); i >= 0; i--) {
+		if (chip->oem_batt_care_mode == BATT_CARE_MODE_ON) {
+			if (batt_temp >= chip->bp.oem_batt_temp_thresh[i]) {
+				factor_cont_chg = chip->bp.oem_cont_chg_factor_batt_care[i];
+				break;
+			}
+		} else {
+			if (batt_temp >= chip->bp.oem_batt_temp_thresh[i]) {
+				factor_cont_chg = chip->bp.oem_cont_chg_factor[i];
+				break;
+			}
+		}
+	}
+
+	chip->oem_online.total_time = chip->oem_online.total_time + factor_cont_chg;
+
+	pr_info("capacity:%d, battery temp:%d, total online time:%d\n", chip->msoc, batt_temp, chip->oem_online.total_time);
+
+next_work:
+	schedule_delayed_work(&chip->oem_online_time_work, msecs_to_jiffies(ONLINE_TIME_CHECK_CYCLE));
+	return;
+
+exit:
+	pr_info("Calculation of total online time is ended.\n");
+}
+
+static int oem_control_batt_care_param(struct qpnp_qg *chip)
+{
+	static bool find_fv_flag = false;
+	static int last_batt_care_mode = BATT_CARE_MODE_INIT;
+	int rc = 0;
+	bool vote_enable = false;
+
+	if (last_batt_care_mode == chip->oem_batt_care_mode) {
+		pr_debug("No change to batt_care_mode\n");
+		goto out;
+	} else {
+		last_batt_care_mode = chip->oem_batt_care_mode;
+	}
+
+	if (!find_fv_flag && !chip->fv_votable) {
+		find_fv_flag = true;
+		chip->fv_votable = find_votable("FV");
+	}
+	if (!chip->fv_votable) {
+		find_fv_flag = false;
+		pr_err("Couldn't find FV votable\n");
+		goto out;
+	}
+
+	if (chip->oem_batt_care_mode == BATT_CARE_MODE_ON) {
+		vote_enable = true;
+	}
+
+	rc = vote(chip->fv_votable, BATT_CARE_VOTER, vote_enable, chip->oem_batt_care_float_volt_uv);
+
+	pr_info("batt_care_mode:%d, batt_care_float_volt_uv:%d\n", chip->oem_batt_care_mode, chip->oem_batt_care_float_volt_uv);
+
+out:
+	return rc;
+}
+/*-------*/
+
 static int qpnp_qg_probe(struct platform_device *pdev)
 {
 	int rc = 0, soc = 0, nom_cap_uah;
@@ -4712,6 +5307,7 @@ static int qpnp_qg_probe(struct platform_device *pdev)
 	INIT_WORK(&chip->udata_work, process_udata_work);
 	INIT_WORK(&chip->qg_status_change_work, qg_status_change_work);
 	INIT_DELAYED_WORK(&chip->qg_sleep_exit_work, qg_sleep_exit_work);
+	INIT_DELAYED_WORK(&chip->oem_online_time_work, oem_online_time_work);
 	mutex_init(&chip->bus_lock);
 	mutex_init(&chip->soc_lock);
 	mutex_init(&chip->data_lock);
@@ -4853,6 +5449,11 @@ static int qpnp_qg_probe(struct platform_device *pdev)
 		goto fail_device;
 	}
 
+	chip->fv_votable = find_votable("FV");
+	if (!chip->fv_votable) {
+		pr_err("Couldn't find FV votable rc=%d\n", rc);
+	}
+
 	rc = qg_init_psy(chip);
 	if (rc < 0) {
 		pr_err("Failed to initialize QG psy, rc=%d\n", rc);
@@ -4875,6 +5476,17 @@ static int qpnp_qg_probe(struct platform_device *pdev)
 	if (rc < 0) {
 		pr_err("Failed to create sysfs files rc=%d\n", rc);
 		goto fail_votable;
+	}
+
+	rc = oem_smem_param_init(chip);
+	if (chip->bp.oem_cycle_count_levels > 0) {
+		oem_thresh_check(chip, CYCLE_COUNT);
+	}
+	if (chip->bp.oem_cont_chg_levels > 0) {
+		oem_thresh_check(chip, CONT_CHG);
+	}
+	if (chip->oem_batt_care_mode == BATT_CARE_MODE_ON) {
+		rc = oem_control_batt_care_param(chip);
 	}
 
 	qg_get_battery_capacity(chip, &soc);
@@ -4905,6 +5517,7 @@ static int qpnp_qg_remove(struct platform_device *pdev)
 	cancel_delayed_work_sync(&chip->qg_sleep_exit_work);
 	cancel_work_sync(&chip->udata_work);
 	cancel_work_sync(&chip->qg_status_change_work);
+	cancel_delayed_work_sync(&chip->oem_online_time_work);
 	sysfs_remove_groups(&chip->dev->kobj, qg_groups);
 	debugfs_remove_recursive(chip->dfs_root);
 	device_destroy(chip->qg_class, chip->dev_no);

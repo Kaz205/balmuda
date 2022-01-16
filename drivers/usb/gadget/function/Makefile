@@ -2,6 +2,10 @@
 #
 # USB peripheral controller drivers
 #
+#
+# This software is contributed or developed by KYOCERA Corporation.
+# (C) 2018 KYOCERA Corporation
+#
 
 ccflags-y			:= -I$(srctree)/drivers/usb/gadget/
 ccflags-y			+= -I$(srctree)/drivers/usb/gadget/udc/
@@ -69,6 +73,10 @@ usb_f_mtp-y			:= f_mtp.o
 obj-$(CONFIG_USB_F_MTP)		+= usb_f_mtp.o
 usb_f_ptp-y			:= f_ptp.o
 obj-$(CONFIG_USB_F_PTP)		+= usb_f_ptp.o
+usb_f_kc_cdev-y			:= f_kc_cdev.o
+obj-$(CONFIG_USB_F_KC_CDEV)	+= usb_f_kc_cdev.o
+usb_f_nmea-y			:= f_nmea.o
+obj-$(CONFIG_USB_F_NMEA)	+= usb_f_nmea.o
 usb_f_qcrndis-y			:= f_qc_rndis.o u_data_ipa.o
 obj-$(CONFIG_USB_F_QCRNDIS)	+= usb_f_qcrndis.o
 usb_f_rmnet_bam-y               := f_rmnet.o u_ctrl_qti.o

@@ -1,3 +1,7 @@
+/*
+ * This software is contributed or developed by KYOCERA Corporation.
+ * (C) 2020 KYOCERA Corporation
+ */
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
  * Copyright (c) 2018-2021 The Linux Foundation. All rights reserved.
@@ -91,18 +95,68 @@ enum print_reason {
 #define ITERM_LIMITS_PM8150B_MA		10000
 #define ADC_CHG_ITERM_MASK		32767
 
+#define SDP_50_MA			50000
 #define SDP_100_MA			100000
-#define SDP_CURRENT_UA			500000
-#define CDP_CURRENT_UA			1500000
-#define DCP_CURRENT_UA			1500000
+#define SDP_CURRENT_UA			475000
+#define CDP_CURRENT_UA			1425000
+#define DCP_CURRENT_UA			1425000
 #define HVDCP_CURRENT_UA		3000000
-#define TYPEC_DEFAULT_CURRENT_UA	900000
-#define TYPEC_MEDIUM_CURRENT_UA		1500000
-#define TYPEC_HIGH_CURRENT_UA		3000000
+#define TYPEC_DEFAULT_CURRENT_UA	1425000
+#define TYPEC_MEDIUM_CURRENT_UA		1425000
+#define TYPEC_HIGH_CURRENT_UA		1900000
 #define DCIN_ICL_MIN_UA			100000
 #define DCIN_ICL_MAX_UA			1500000
 #define DCIN_ICL_STEP_UA		100000
 #define ROLE_REVERSAL_DELAY_MS		500
+
+/*-------*/
+#define OEM_CMD_VOTER			"OEM_CMD_VOTER"
+#define OEM_BATT_CHG_EN_VOTER	"OEM_BATT_CHG_EN_VOTER"
+#define OEM_DET_CHGER_VOTER		"OEM_DET_CHGER_VOTER"
+
+#define OEM_CHGLOG_WARM_LIMIT_BIT		BIT(0)
+#define OEM_CHGLOG_WARM_STOP_BIT		BIT(1)
+#define OEM_CHGLOG_COOL_LIMIT_BIT		BIT(2)
+#define OEM_CHGLOG_COOL_STOP_BIT		BIT(3)
+#define OEM_CHGLOG_SLOW_CHARGER_BIT		BIT(4)
+#define OEM_CHGLOG_STOP_CHARGER_BIT		BIT(5)
+#define OEM_CHGLOG_CHARGER_ERR_BIT		BIT(6)
+#define OEM_CHGLOG_CABLE_ERR_BIT		BIT(7)
+#define OEM_CHGLOG_CHARGER_BAD_BIT		BIT(8)
+#define OEM_CHGLOG_CABLE_BAD_BIT		BIT(9)
+#define OEM_CHGLOG_WIRELESS_CHG_BIT		BIT(10)
+#define OEM_CHGLOG_POOR_CHARGER_BIT		BIT(11)
+#define OEM_CHGLOG_TEMP_MASK			GENMASK(3, 0)
+#define OEM_CHGLOG_MONITOR_MASK			GENMASK(9, 6)
+
+#ifdef CONFIG_KC_USB_SWIC
+#define OEM_SWIC_DELAY_MS		100
+
+enum {
+	NO_PLUGGED = 0,
+	USB_PLUGGED = 1,
+	AUDIO_PLUGGED = 2,
+};
+#endif
+
+#ifdef CONFIG_OEM_WIRELESS_CHARGER
+enum {
+	OEM_WCHG_EN_DISABLE = 0,
+	OEM_WCHG_EN_ENABLE = 1,
+};
+
+enum {
+	OEM_WCHG_NO_DET = 0,
+	OEM_WCHG_DET = 1,
+};
+
+enum {
+	OEM_CHGER_TYPE_UNKNOWN = 0,
+	OEM_CHGER_TYPE_BPP = 1,
+	OEM_CHGER_TYPE_EPP = 2,
+};
+#endif
+/*-------*/
 
 enum smb_mode {
 	PARALLEL_MASTER = 0,
@@ -616,6 +670,38 @@ struct smb_charger {
 	int			dcin_uv_count;
 	ktime_t			dcin_uv_last_time;
 	int			last_wls_vout;
+
+	/* oem add */
+	int			oem_recharge_vol;
+	int			oem_auto_on_enable;
+	int			oem_auto_on_detect;
+	int			oem_chgpad_detect;
+	int			oem_charger_status;
+	int			oem_dcin_icl_ua;
+	int			oem_lowbatt_boot;
+	int			oem_ext_chg_det_n;
+	int			oem_chg_log;
+	int			oem_thermal_limit_level;
+	struct mutex		oem_chglog_lock;
+	struct delayed_work	oem_slow_charger_work;
+	struct delayed_work	oem_err_charger_work;
+#ifdef CONFIG_KC_USB_SWIC
+	struct delayed_work	oem_swic_check_work;
+#endif
+#ifdef CONFIG_OEM_WIRELESS_CHARGER
+	enum power_supply_type		oem_dc_real_type;
+	struct power_supply		*wchg_psy;
+	int			oem_wchg_inhibit;
+	int			oem_wchg_dummy;
+	int			oem_iterm_limit_enable;
+	int			oem_wls_epp_icl_ua;
+	int			oem_wchg_disable_thresh;
+	bool		oem_wchg_ov;
+	bool		oem_wchg_en_status;
+#endif
+#ifdef CONFIG_OEM_HKADC
+	int			oem_usb_temp_level;
+#endif
 };
 
 int smblib_read(struct smb_charger *chg, u16 addr, u8 *val);
@@ -840,4 +926,19 @@ int smblib_get_qc3_main_icl_offset(struct smb_charger *chg, int *offset_ua);
 
 int smblib_init(struct smb_charger *chg);
 int smblib_deinit(struct smb_charger *chg);
+
+/*-------*/
+int oem_smblib_chglog_change(struct smb_charger *chg, u16 bit, bool detect);
+int oem_smblib_chglog_temp_level(struct smb_charger *chg);
+void oem_smblib_status_change_detect(struct smb_charger *chg, int status);
+#ifdef CONFIG_OEM_HKADC
+int oem_smblib_charger_output_en(struct smb_charger *chg);
+#endif
+#ifdef CONFIG_OEM_WIRELESS_CHARGER
+int oem_chg_get_property_on_wchg(struct smb_charger *chg, enum power_supply_property prop);
+int oem_smblib_charge_inhibit_en(struct smb_charger *chg, bool enable);
+int oem_smbchg_wchg_dummy_status(struct smb_charger *chg, union power_supply_propval *val);
+int oem_smbchg_wchg_capcity_check(struct smb_charger *chg, union power_supply_propval *val);
+#endif
+/*-------*/
 #endif /* __SMB5_CHARGER_H */

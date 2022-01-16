@@ -15,6 +15,10 @@
  * Rewrote bits to get rid of console_lock
  *	01Mar01 Andrew Morton
  */
+/*
+ * This software is contributed or developed by KYOCERA Corporation.
+ * (C) 2020 KYOCERA Corporation
+ */
 
 #include <linux/kernel.h>
 #include <linux/mm.h>
@@ -468,6 +472,22 @@ u32 log_buf_len_get(void)
 	return log_buf_len;
 }
 EXPORT_SYMBOL_GPL(log_buf_len_get);
+
+/* Return log buffer size address*/
+u32* log_buf_len_addr_get(void)
+{
+	return &log_buf_len;
+}
+/* Return log_first_idx address */
+u32* log_first_idx_addr_get(void)
+{
+	return &log_first_idx;
+}
+/* Return log_next_idx address */
+u32* log_next_idx_addr_get(void)
+{
+	return &log_next_idx;
+}
 
 /* human readable text of the record */
 static char *log_text(const struct printk_log *msg)

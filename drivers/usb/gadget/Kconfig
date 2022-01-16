@@ -12,6 +12,10 @@
 # With help from a special transceiver and a "Mini-AB" jack, systems with
 # both kinds of controller can also support "USB On-the-Go" (CONFIG_USB_OTG).
 #
+#
+# This software is contributed or developed by KYOCERA Corporation.
+# (C) 2018 KYOCERA Corporation
+#
 
 menuconfig USB_GADGET
 	tristate "USB Gadget Support"
@@ -230,6 +234,12 @@ config USB_F_CDEV
 	tristate
 
 config USB_F_CCID
+	tristate
+
+config USB_F_KC_CDEV
+	tristate
+
+config USB_F_NMEA
 	tristate
 
 config USB_F_AUDIO_SRC
@@ -580,6 +590,8 @@ config USB_CONFIGFS_F_DIAG
 config USB_CONFIGFS_F_CDEV
 	bool "USB Serial Character function"
 	select USB_F_CDEV
+	select USB_F_KC_CDEV
+	select USB_F_NMEA
 	depends on USB_CONFIGFS
 	help
 	  The serial character function is a generic function driver that

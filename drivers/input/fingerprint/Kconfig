@@ -1,0 +1,75 @@
+# This software is contributed or developed by KYOCERA Corporation.
+# (C) 2019 KYOCERA Corporation
+#
+# Input fingerprint drivers configuration
+#
+
+config INPUT_FINGERPRINT
+	bool "Enable Fingerprint Driver Support"
+	default y
+	help
+	  Add support for fingerprint driver.
+
+if INPUT_FINGERPRINT
+config INPUT_FINGERPRINT_FPC
+	bool "Enable Fingerprint Driver Support of FPC"
+	depends on INPUT_FINGERPRINT
+	default n
+	help
+	  Add support for fingerprint driver of fpc.
+
+config INPUT_FINGERPRINT_CANVASBIO_TSUBAKI02
+	bool "Enable Fingerprint Driver Support of CANVASBIO"
+	depends on INPUT_FINGERPRINT
+	default n
+	help
+	  Add support for fingerprint driver of canvasbio.
+
+config INPUT_FINGERPRINT_CANVASBIO_TSUBAKI03
+	bool "Enable Fingerprint Driver Support of CANVASBIO"
+	depends on INPUT_FINGERPRINT
+	default n
+	help
+	  Add support for fingerprint driver of canvasbio.
+
+config INPUT_FINGERPRINT_EGIS
+	bool "Enable Fingerprint Driver Support of EGIS"
+	default y
+	help
+	  Add support for fingerprint driver of egis.
+
+endif
+
+if INPUT_FINGERPRINT_FPC
+config INPUT_FINGERPRINT_FPC1020
+	bool "Enable Fingerprint Driver Support of FPC1020"
+	default y
+	help
+	  Add support for fingerprint driver of fpc1020.
+endif
+
+if INPUT_FINGERPRINT_CANVASBIO_TSUBAKI02 || INPUT_FINGERPRINT_CANVASBIO_TSUBAKI03
+config CANVASBIO_FINGERPRINT
+	tristate "Canvasbio fp platform device"
+	default y
+	help
+	  If say Y here to use CanvasBio fingerprint driver.
+
+	  If unsure, say N.
+
+config CANVASBIO_FINGERPRINT_NAVIGATION
+	tristate "Canvasbio fp navigation device"
+	depends on CANVASBIO_FINGERPRINT
+	default y
+	help
+	  If say Y here, you can use fingerprint navigation.
+endif
+
+if INPUT_FINGERPRINT_EGIS
+config EGIS_FINGERPRINT_NAVIGATION
+	tristate "EIGS fp navigation device"
+	depends on EGIS_FINGERPRINT
+	default n
+	help
+	  If say Y here, you can use fingerprint navigation.
+endif

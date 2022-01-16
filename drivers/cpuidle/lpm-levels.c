@@ -44,6 +44,8 @@
 #define CREATE_TRACE_POINTS
 #include <trace/events/trace_msm_low_power.h>
 
+#include <linux/pinctrl/pinctrl.h>
+
 #define SCLK_HZ (32768)
 #define PSCI_POWER_STATE(reset) (reset << 30)
 #define PSCI_AFFINITY_LEVEL(lvl) ((lvl & 0x3) << 24)
@@ -1721,6 +1723,9 @@ static void lpm_suspend_wake(void)
 	lpm_stats_suspend_exit();
 }
 
+static unsigned g_debug_suspend = 0;
+module_param_named(debug_suspend, g_debug_suspend, uint, 0644);
+
 static int lpm_suspend_enter(suspend_state_t state)
 {
 	int cpu = raw_smp_processor_id();
@@ -1747,7 +1752,9 @@ static int lpm_suspend_enter(suspend_state_t state)
 	 */
 	clock_debug_print_enabled();
 	regulator_debug_print_enabled();
-
+	if( g_debug_suspend )
+		msm_gpio_dbg_print();
+	
 	cpu_prepare(lpm_cpu, idx, false);
 	cluster_prepare(cluster, cpumask, idx, false, 0);
 

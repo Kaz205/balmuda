@@ -1,3 +1,7 @@
+/*
+ * This software is contributed or developed by KYOCERA Corporation.
+ * (C) 2020 KYOCERA Corporation
+ */
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2012-2020, The Linux Foundation. All rights reserved.
@@ -892,7 +896,7 @@ static const struct adc_channels adc_chans_pmic5[ADC_MAX_CHANNEL] = {
 	[ADC_MID_CHG_DIV6]	= ADC_CHAN_VOLT("chg_mid_chg", 6,
 					SCALE_HW_CALIB_DEFAULT)
 	[ADC_XO_THERM_PU2]	= ADC_CHAN_TEMP("xo_therm", 1,
-					SCALE_HW_CALIB_XOTHERM)
+					SCALE_OEM_THERM)
 	[ADC_BAT_THERM_PU2]	= ADC_CHAN_TEMP("bat_therm_pu2", 1,
 					SCALE_HW_CALIB_BATT_THERM_100K)
 	[ADC_BAT_THERM_PU1]	= ADC_CHAN_TEMP("bat_therm_pu1", 1,
@@ -902,11 +906,11 @@ static const struct adc_channels adc_chans_pmic5[ADC_MAX_CHANNEL] = {
 	[ADC_BAT_ID_PU2]	= ADC_CHAN_TEMP("bat_id", 1,
 					SCALE_HW_CALIB_DEFAULT)
 	[ADC_AMUX_THM1_PU2]	= ADC_CHAN_TEMP("amux_thm1_pu2", 1,
-					SCALE_HW_CALIB_THERM_100K_PULLUP)
+					SCALE_OEM_THERM)
 	[ADC_AMUX_THM2_PU2]	= ADC_CHAN_TEMP("amux_thm2_pu2", 1,
-					SCALE_HW_CALIB_THERM_100K_PULLUP)
+					SCALE_OEM_THERM)
 	[ADC_AMUX_THM3_PU2]	= ADC_CHAN_TEMP("amux_thm3_pu2", 1,
-					SCALE_HW_CALIB_THERM_100K_PULLUP)
+					SCALE_OEM_THERM)
 	[ADC_AMUX_THM4_PU2]	= ADC_CHAN_TEMP("amux_thm4_pu2", 1,
 					SCALE_HW_CALIB_THERM_100K_PULLUP)
 	[ADC_PARALLEL_ISENSE]	= ADC_CHAN_VOLT("parallel_isense", 1,
@@ -926,11 +930,11 @@ static const struct adc_channels adc_chans_pmic5[ADC_MAX_CHANNEL] = {
 	[ADC_GPIO1_PU2]	= ADC_CHAN_TEMP("gpio1_pu2", 1,
 					SCALE_HW_CALIB_THERM_100K_PULLUP)
 	[ADC_GPIO2_PU2]	= ADC_CHAN_TEMP("gpio2_pu2", 1,
-					SCALE_HW_CALIB_THERM_100K_PULLUP)
+					SCALE_OEM_THERM)
 	[ADC_GPIO3_PU2]	= ADC_CHAN_TEMP("gpio3_pu2", 1,
-					SCALE_HW_CALIB_THERM_100K_PULLUP)
+					SCALE_OEM_THERM)
 	[ADC_GPIO4_PU2]	= ADC_CHAN_TEMP("gpio4_pu2", 1,
-					SCALE_HW_CALIB_THERM_100K_PULLUP)
+					SCALE_OEM_THERM)
 };
 
 static const struct adc_channels adc7_chans_pmic[ADC_MAX_CHANNEL] = {

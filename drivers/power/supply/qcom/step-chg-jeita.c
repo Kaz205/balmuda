@@ -1,3 +1,7 @@
+/*
+ * This software is contributed or developed by KYOCERA Corporation.
+ * (C) 2020 KYOCERA Corporation
+ */
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2017-2019, 2021 The Linux Foundation. All rights reserved.
@@ -61,21 +65,32 @@ struct step_chg_info {
 	int			get_config_retry_count;
 	int			jeita_last_update_temp;
 	int			jeita_fcc_scaling_temp_threshold[2];
+	int			*oem_temp_thresh;
+	int			oem_temp_levels;
+	int			oem_temp_status;
 	long			jeita_max_fcc_ua;
 	long			jeita_fcc_step_size;
 
 	struct step_chg_cfg	*step_chg_config;
+	struct step_chg_cfg	*step_chg_cool_config;
+	struct step_chg_cfg	*step_chg_weekcool_config;
+	struct step_chg_cfg	*step_chg_normal_config;
+	struct step_chg_cfg	*step_chg_warm_config;
 	struct jeita_fcc_cfg	*jeita_fcc_config;
 	struct jeita_fv_cfg	*jeita_fv_config;
 
 	struct votable		*fcc_votable;
 	struct votable		*fv_votable;
 	struct votable		*usb_icl_votable;
+	struct votable		*chg_disable_votable;
 	struct wakeup_source	*step_chg_ws;
 	struct power_supply	*batt_psy;
 	struct power_supply	*bms_psy;
 	struct power_supply	*usb_psy;
 	struct power_supply	*dc_psy;
+#ifdef CONFIG_OEM_WIRELESS_CHARGER
+	struct power_supply	*wchg_psy;
+#endif
 	struct delayed_work	status_change_work;
 	struct delayed_work	get_config_work;
 	struct notifier_block	nb;
@@ -89,6 +104,15 @@ static struct step_chg_info *the_chip;
 #define GET_CONFIG_DELAY_MS		2000
 #define GET_CONFIG_RETRY_COUNT		50
 #define WAIT_BATT_ID_READY_MS		200
+
+#define OEM_BATT_TEMP_DEFAULT		250
+
+enum {
+	OEM_BATT_TEMP_COOL = 0,
+	OEM_BATT_TEMP_WEEKCOOL,
+	OEM_BATT_TEMP_NORMAL,
+	OEM_BATT_TEMP_WARM,
+};
 
 static bool is_batt_available(struct step_chg_info *chip)
 {
@@ -149,6 +173,19 @@ static bool is_input_present(struct step_chg_info *chip)
 		else
 			input_present |= pval.intval;
 	}
+
+#ifdef CONFIG_OEM_WIRELESS_CHARGER
+	if (!chip->wchg_psy)
+		chip->wchg_psy = power_supply_get_by_name("wireless");
+	if (chip->wchg_psy) {
+		rc = power_supply_get_property(chip->wchg_psy,
+				POWER_SUPPLY_PROP_PRESENT, &pval);
+		if (rc < 0)
+			pr_err("Couldn't read wireless Present status, rc=%d\n", rc);
+		else
+			input_present |= pval.intval;
+	}
+#endif
 
 	if (input_present)
 		return true;
@@ -236,6 +273,7 @@ static int get_step_chg_jeita_setting_from_profile(struct step_chg_info *chip)
 	const char *batt_type_str;
 	const __be32 *handle;
 	int batt_id_ohms, rc, hysteresis[2] = {0};
+	int byte_len;
 	u32 jeita_scaling_min_fcc_ua = 0;
 	union power_supply_propval prop = {0, };
 
@@ -344,6 +382,67 @@ static int get_step_chg_jeita_setting_from_profile(struct step_chg_info *chip)
 		chip->step_chg_cfg_valid = false;
 	}
 
+	rc = read_range_data_from_node(profile_node,
+			"qcom,step-chg-ranges-cool",
+			chip->step_chg_cool_config->fcc_cfg,
+			chip->soc_based_step_chg ? 100 : max_fv_uv,
+			max_fcc_ma * 1000);
+	if (rc < 0) {
+		pr_err("Read qcom,step-chg-ranges-cool failed from battery profile, rc=%d\n",
+					rc);
+		chip->step_chg_cfg_valid = false;
+	}
+	rc = read_range_data_from_node(profile_node,
+			"qcom,step-chg-ranges-weekcool",
+			chip->step_chg_weekcool_config->fcc_cfg,
+			chip->soc_based_step_chg ? 100 : max_fv_uv,
+			max_fcc_ma * 1000);
+	if (rc < 0) {
+		pr_err("Read qcom,step-chg-ranges-weekcool failed from battery profile, rc=%d\n",
+					rc);
+		chip->step_chg_cfg_valid = false;
+	}
+	rc = read_range_data_from_node(profile_node,
+			"qcom,step-chg-ranges-normal",
+			chip->step_chg_normal_config->fcc_cfg,
+			chip->soc_based_step_chg ? 100 : max_fv_uv,
+			max_fcc_ma * 1000);
+	if (rc < 0) {
+		pr_err("Read qcom,step-chg-ranges-normal failed from battery profile, rc=%d\n",
+					rc);
+		chip->step_chg_cfg_valid = false;
+	}
+	rc = read_range_data_from_node(profile_node,
+			"qcom,step-chg-ranges-warm",
+			chip->step_chg_warm_config->fcc_cfg,
+			chip->soc_based_step_chg ? 100 : max_fv_uv,
+			max_fcc_ma * 1000);
+	if (rc < 0) {
+		pr_err("Read qcom,step-chg-ranges-warm failed from battery profile, rc=%d\n",
+					rc);
+		chip->step_chg_cfg_valid = false;
+	}
+
+	if (of_find_property(profile_node, "qcom,step-chg-temp-thresh", &byte_len)) {
+		chip->oem_temp_thresh = devm_kzalloc(chip->dev, byte_len,
+			GFP_KERNEL);
+
+		if (chip->oem_temp_thresh == NULL) {
+			pr_err("Couldn't read step_chg_temp_thresh rc = %d\n", rc);
+			chip->step_chg_cfg_valid = false;
+		} else {
+			chip->oem_temp_levels = byte_len / sizeof(u32);
+			rc = of_property_read_u32_array(profile_node,
+					"qcom,step-chg-temp-thresh",
+					chip->oem_temp_thresh,
+					chip->oem_temp_levels);
+			if (rc < 0) {
+				pr_err("Couldn't step_chg_temp_thresh limits rc = %d\n", rc);
+				chip->step_chg_cfg_valid = false;
+			}
+		}
+	}
+
 	chip->sw_jeita_cfg_valid = true;
 	rc = read_range_data_from_node(profile_node,
 			"qcom,jeita-fcc-ranges",
@@ -441,16 +540,38 @@ static void get_config_work(struct work_struct *work)
 
 	chip->config_is_read = true;
 
-	for (i = 0; i < MAX_STEP_CHG_ENTRIES; i++)
+	for (i = 0; i < MAX_STEP_CHG_ENTRIES; i++) {
 		pr_debug("step-chg-cfg: %duV(SoC) ~ %duV(SoC), %duA\n",
 			chip->step_chg_config->fcc_cfg[i].low_threshold,
 			chip->step_chg_config->fcc_cfg[i].high_threshold,
 			chip->step_chg_config->fcc_cfg[i].value);
-	for (i = 0; i < MAX_STEP_CHG_ENTRIES; i++)
+
+		pr_debug("step-chg-cool-cfg: %duV(SoC) ~ %duV(SoC), %duA\n",
+			chip->step_chg_cool_config->fcc_cfg[i].low_threshold,
+			chip->step_chg_cool_config->fcc_cfg[i].high_threshold,
+			chip->step_chg_cool_config->fcc_cfg[i].value);
+		pr_debug("step-chg-weekcool-cfg: %duV(SoC) ~ %duV(SoC), %duA\n",
+			chip->step_chg_weekcool_config->fcc_cfg[i].low_threshold,
+			chip->step_chg_weekcool_config->fcc_cfg[i].high_threshold,
+			chip->step_chg_weekcool_config->fcc_cfg[i].value);
+		pr_debug("step-chg-normal-cfg: %duV(SoC) ~ %duV(SoC), %duA\n",
+			chip->step_chg_normal_config->fcc_cfg[i].low_threshold,
+			chip->step_chg_normal_config->fcc_cfg[i].high_threshold,
+			chip->step_chg_normal_config->fcc_cfg[i].value);
+		pr_debug("step-chg-warm-cfg: %duV(SoC) ~ %duV(SoC), %duA\n",
+			chip->step_chg_warm_config->fcc_cfg[i].low_threshold,
+			chip->step_chg_warm_config->fcc_cfg[i].high_threshold,
+			chip->step_chg_warm_config->fcc_cfg[i].value);
+	}
+	for (i = 0; i < MAX_STEP_CHG_ENTRIES; i++) {
 		pr_debug("jeita-fcc-cfg: %ddecidegree ~ %ddecidegre, %duA\n",
 			chip->jeita_fcc_config->fcc_cfg[i].low_threshold,
 			chip->jeita_fcc_config->fcc_cfg[i].high_threshold,
 			chip->jeita_fcc_config->fcc_cfg[i].value);
+		if (chip->jeita_fcc_config->fcc_cfg[i].high_threshold) {
+			chip->jeita_fcc_config->param.number_of_steps++;
+		}
+	}
 	for (i = 0; i < MAX_STEP_CHG_ENTRIES; i++)
 		pr_debug("jeita-fv-cfg: %ddecidegree ~ %ddecidegre, %duV\n",
 			chip->jeita_fv_config->fv_cfg[i].low_threshold,
@@ -469,6 +590,7 @@ static int get_val(struct range_data *range, int rise_hys, int fall_hys,
 		int current_index, int threshold, int *new_index, int *val)
 {
 	int i;
+	static int last_batt_temp_status = OEM_BATT_TEMP_COOL;
 
 	*new_index = -EINVAL;
 
@@ -519,10 +641,17 @@ static int get_val(struct range_data *range, int rise_hys, int fall_hys,
 	if (current_index == -EINVAL)
 		return 0;
 
+	if (last_batt_temp_status != the_chip->oem_temp_status) {
+		last_batt_temp_status = the_chip->oem_temp_status;
+		pr_debug("Changing area of STEP charging\n");
+		return 0;
+	}
+
 	/*
 	 * Check for hysteresis if it in the neighbourhood
 	 * of our current index.
 	 */
+#ifdef QUALCOMM_ORIGINAL_FEATURE
 	if (*new_index == current_index + 1) {
 		if (threshold <
 			(range[*new_index].low_threshold + rise_hys)) {
@@ -544,6 +673,24 @@ static int get_val(struct range_data *range, int rise_hys, int fall_hys,
 			*val = range[current_index].value;
 		}
 	}
+#else
+	if (*new_index < current_index) {
+		if (threshold > range[current_index -1].high_threshold - fall_hys) {
+			/*
+			 * stay in the current index, threshold is not lower
+			 * by hysteresis amount
+			 */
+			*new_index = current_index;
+			*val = range[current_index].value;
+		} else {
+			/*
+			 * move to the next neighbourhood
+			 */
+			*new_index = current_index -1;
+			*val = range[*new_index].value;
+		}
+	}
+#endif
 	return 0;
 }
 
@@ -594,12 +741,20 @@ static int handle_step_chg_config(struct step_chg_info *chip)
 {
 	union power_supply_propval pval = {0, };
 	int rc = 0, fcc_ua = 0, current_index;
+	int i, batt_temp;
 	u64 elapsed_us;
 
 	elapsed_us = ktime_us_delta(ktime_get(), chip->step_last_update_time);
 	/* skip processing, event too early */
 	if (elapsed_us < STEP_CHG_HYSTERISIS_DELAY_US)
 		return 0;
+
+	rc = power_supply_get_property(chip->batt_psy,
+		POWER_SUPPLY_PROP_TEMP, &pval);
+	if (rc < 0)
+		batt_temp = OEM_BATT_TEMP_DEFAULT;
+	else
+		batt_temp = pval.intval;
 
 	rc = power_supply_get_property(chip->batt_psy,
 		POWER_SUPPLY_PROP_STEP_CHARGING_ENABLED, &pval);
@@ -627,7 +782,16 @@ static int handle_step_chg_config(struct step_chg_info *chip)
 		return rc;
 	}
 
+	for (i = (chip->oem_temp_levels - 1); i >= 0; i--) {
+		if (batt_temp >= chip->oem_temp_thresh[i]) {
+			chip->oem_temp_status = i;
+			break;
+		}
+	}
+	pr_debug("batt_temp:%d, batt_temp_status:%d\n", batt_temp, chip->oem_temp_status);
+
 	current_index = chip->step_index;
+#ifdef QUALCOMM_ORIGINAL_FEATURE
 	rc = get_val(chip->step_chg_config->fcc_cfg,
 			chip->step_chg_config->param.rise_hys,
 			chip->step_chg_config->param.fall_hys,
@@ -635,6 +799,41 @@ static int handle_step_chg_config(struct step_chg_info *chip)
 			pval.intval,
 			&chip->step_index,
 			&fcc_ua);
+#else
+	if (chip->oem_temp_status == OEM_BATT_TEMP_COOL) {
+		rc = get_val(chip->step_chg_cool_config->fcc_cfg,
+				chip->step_chg_config->param.rise_hys,
+				chip->step_chg_config->param.fall_hys,
+				chip->step_index,
+				pval.intval,
+				&chip->step_index,
+				&fcc_ua);
+	} else if (chip->oem_temp_status == OEM_BATT_TEMP_WEEKCOOL) {
+		rc = get_val(chip->step_chg_weekcool_config->fcc_cfg,
+				chip->step_chg_config->param.rise_hys,
+				chip->step_chg_config->param.fall_hys,
+				chip->step_index,
+				pval.intval,
+				&chip->step_index,
+				&fcc_ua);
+	} else if (chip->oem_temp_status == OEM_BATT_TEMP_NORMAL) {
+		rc = get_val(chip->step_chg_normal_config->fcc_cfg,
+				chip->step_chg_config->param.rise_hys,
+				chip->step_chg_config->param.fall_hys,
+				chip->step_index,
+				pval.intval,
+				&chip->step_index,
+				&fcc_ua);
+	} else if (chip->oem_temp_status == OEM_BATT_TEMP_WARM) {
+		rc = get_val(chip->step_chg_warm_config->fcc_cfg,
+				chip->step_chg_config->param.rise_hys,
+				chip->step_chg_config->param.fall_hys,
+				chip->step_index,
+				pval.intval,
+				&chip->step_index,
+				&fcc_ua);
+	}
+#endif
 	if (rc < 0) {
 		/* remove the vote if no step-based fcc is found */
 		if (chip->fcc_votable)
@@ -658,7 +857,19 @@ static int handle_step_chg_config(struct step_chg_info *chip)
 	if (chip->taper_fcc) {
 		taper_fcc_step_chg(chip, chip->step_index, pval.intval);
 	} else {
+#ifdef QUALCOMM_ORIGINAL_FEATURE
 		fcc_ua = chip->step_chg_config->fcc_cfg[chip->step_index].value;
+#else
+		if (chip->oem_temp_status == OEM_BATT_TEMP_COOL) {
+			fcc_ua = chip->step_chg_cool_config->fcc_cfg[chip->step_index].value;
+		} else if (chip->oem_temp_status == OEM_BATT_TEMP_WEEKCOOL) {
+			fcc_ua = chip->step_chg_weekcool_config->fcc_cfg[chip->step_index].value;
+		} else if (chip->oem_temp_status == OEM_BATT_TEMP_NORMAL) {
+			fcc_ua = chip->step_chg_normal_config->fcc_cfg[chip->step_index].value;
+		} else if (chip->oem_temp_status == OEM_BATT_TEMP_WARM) {
+			fcc_ua = chip->step_chg_warm_config->fcc_cfg[chip->step_index].value;
+		}
+#endif
 		vote(chip->fcc_votable, STEP_CHG_VOTER, true, fcc_ua);
 	}
 
@@ -748,6 +959,9 @@ static int handle_jeita(struct step_chg_info *chip)
 	union power_supply_propval pval = {0, };
 	int rc = 0, fcc_ua = 0, fv_uv = 0;
 	u64 elapsed_us;
+#ifdef CONFIG_OEM_WIRELESS_CHARGER
+	union power_supply_propval pval_2 = {0, };
+#endif
 
 	rc = power_supply_get_property(chip->batt_psy,
 		POWER_SUPPLY_PROP_SW_JEITA_ENABLED, &pval);
@@ -798,6 +1012,30 @@ static int handle_jeita(struct step_chg_info *chip)
 	if (rc < 0)
 		fcc_ua = 0;
 
+#ifdef CONFIG_OEM_WIRELESS_CHARGER
+	if (!chip->usb_icl_votable)
+		chip->usb_icl_votable = find_votable("USB_ICL");
+
+	if (!chip->usb_icl_votable)
+		goto jeita_fcc;
+
+	if (!chip->wchg_psy)
+		chip->wchg_psy = power_supply_get_by_name("wireless");
+
+	if (chip->wchg_psy) {
+		rc = power_supply_get_property(chip->wchg_psy,
+					POWER_SUPPLY_PROP_REAL_TYPE, &pval_2);
+
+		if (pval_2.intval == POWER_SUPPLY_TYPE_WIRELESS) {
+			vote(chip->usb_icl_votable, JEITA_VOTER, true, fcc_ua);
+		} else {
+			vote(chip->usb_icl_votable, JEITA_VOTER, false, 0);
+		}
+	}
+
+jeita_fcc:
+#endif
+
 	if (!chip->fcc_votable)
 		chip->fcc_votable = find_votable("FCC");
 	if (!chip->fcc_votable)
@@ -806,6 +1044,21 @@ static int handle_jeita(struct step_chg_info *chip)
 
 	vote(chip->fcc_votable, JEITA_VOTER, fcc_ua ? true : false, fcc_ua);
 
+	if (!chip->chg_disable_votable)
+		chip->chg_disable_votable = find_votable("CHG_DISABLE");
+
+	if (!chip->chg_disable_votable)
+		goto jeita_fv;
+
+	if (chip->jeita_fcc_index <= 0 ||
+			chip->jeita_fcc_index >= (chip->jeita_fcc_config->param.number_of_steps - 1)) {
+		pr_info("Cold or Hot detect\n");
+		vote(chip->chg_disable_votable, JEITA_VOTER, true, 0);
+	} else {
+		vote(chip->chg_disable_votable, JEITA_VOTER, false, 0);
+	}
+
+jeita_fv:
 	rc = get_val(chip->jeita_fv_config->fv_cfg,
 			chip->jeita_fv_config->param.rise_hys,
 			chip->jeita_fv_config->param.fall_hys,
@@ -841,6 +1094,7 @@ static int handle_jeita(struct step_chg_info *chip)
 	 * Suspend USB input path if battery voltage is above
 	 * JEITA VFLOAT threshold.
 	 */
+#ifdef QUALCOMM_ORIGINAL_FEATURE
 	if (chip->jeita_arb_en && fv_uv > 0) {
 		rc = power_supply_get_property(chip->batt_psy,
 				POWER_SUPPLY_PROP_VOLTAGE_NOW, &pval);
@@ -849,6 +1103,7 @@ static int handle_jeita(struct step_chg_info *chip)
 		else if (pval.intval < (fv_uv - JEITA_SUSPEND_HYST_UV))
 			vote(chip->usb_icl_votable, JEITA_VOTER, false, 0);
 	}
+#endif
 
 set_jeita_fv:
 	vote(chip->fv_votable, JEITA_VOTER, fv_uv ? true : false, fv_uv);
@@ -1000,6 +1255,26 @@ int qcom_step_chg_init(struct device *dev,
 	if (!chip->step_chg_config)
 		return -ENOMEM;
 
+	chip->step_chg_cool_config = devm_kzalloc(dev,
+			sizeof(struct step_chg_cfg), GFP_KERNEL);
+	if (!chip->step_chg_cool_config)
+		return -ENOMEM;
+
+	chip->step_chg_weekcool_config = devm_kzalloc(dev,
+			sizeof(struct step_chg_cfg), GFP_KERNEL);
+	if (!chip->step_chg_weekcool_config)
+		return -ENOMEM;
+
+	chip->step_chg_normal_config = devm_kzalloc(dev,
+			sizeof(struct step_chg_cfg), GFP_KERNEL);
+	if (!chip->step_chg_normal_config)
+		return -ENOMEM;
+
+	chip->step_chg_warm_config = devm_kzalloc(dev,
+			sizeof(struct step_chg_cfg), GFP_KERNEL);
+	if (!chip->step_chg_warm_config)
+		return -ENOMEM;
+
 	chip->step_chg_config->param.psy_prop = POWER_SUPPLY_PROP_VOLTAGE_NOW;
 	chip->step_chg_config->param.prop_name = "VBATT";
 	chip->step_chg_config->param.rise_hys = 100000;
@@ -1014,12 +1289,13 @@ int qcom_step_chg_init(struct device *dev,
 
 	chip->jeita_fcc_config->param.psy_prop = POWER_SUPPLY_PROP_TEMP;
 	chip->jeita_fcc_config->param.prop_name = "BATT_TEMP";
-	chip->jeita_fcc_config->param.rise_hys = 10;
-	chip->jeita_fcc_config->param.fall_hys = 10;
+	chip->jeita_fcc_config->param.rise_hys = 20;
+	chip->jeita_fcc_config->param.fall_hys = 20;
+	chip->jeita_fcc_config->param.number_of_steps = 0;
 	chip->jeita_fv_config->param.psy_prop = POWER_SUPPLY_PROP_TEMP;
 	chip->jeita_fv_config->param.prop_name = "BATT_TEMP";
-	chip->jeita_fv_config->param.rise_hys = 10;
-	chip->jeita_fv_config->param.fall_hys = 10;
+	chip->jeita_fv_config->param.rise_hys = 20;
+	chip->jeita_fv_config->param.fall_hys = 20;
 
 	INIT_DELAYED_WORK(&chip->status_change_work, status_change_work);
 	INIT_DELAYED_WORK(&chip->get_config_work, get_config_work);

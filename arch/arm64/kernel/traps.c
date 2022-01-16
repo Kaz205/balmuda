@@ -16,6 +16,10 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
+/*
+ * This software is contributed or developed by KYOCERA Corporation.
+ * (C) 2020 KYOCERA Corporation
+ */
 
 #include <linux/bug.h>
 #include <linux/signal.h>
@@ -36,6 +40,7 @@
 #include <linux/syscalls.h>
 #include <linux/mm_types.h>
 #include <linux/kasan.h>
+#include <linux/crash_reason.h>
 
 #include <asm/atomic.h>
 #include <asm/barrier.h>
@@ -225,6 +230,8 @@ void die(const char *str, struct pt_regs *regs, int err)
 {
 	int ret;
 	unsigned long flags;
+
+	set_smem_crash_info_data_add_reg( regs->pc, regs->pstate, current->comm );
 
 	raw_spin_lock_irqsave(&die_lock, flags);
 

@@ -9,6 +9,11 @@
  *
  * License terms: GNU General Public License (GPL) version 2
  */
+/*
+ * This software is contributed or developed by KYOCERA Corporation.
+ * (C) 2019 KYOCERA Corporation
+ */
+
 #ifndef __LINUX_PINCTRL_PINCTRL_H
 #define __LINUX_PINCTRL_PINCTRL_H
 
@@ -209,5 +214,7 @@ static inline bool pin_is_valid(struct pinctrl_dev *pctldev, int pin)
 }
 
 #endif /* !CONFIG_PINCTRL */
+
+void msm_gpio_dbg_print(void);
 
 #endif /* __LINUX_PINCTRL_PINCTRL_H */

@@ -19,6 +19,11 @@
  * The valid range of num_buffers is: num >= 2 && num <= 4.
  */
 
+/*
+ * This software is contributed or developed by KYOCERA Corporation.
+ * (C) 2018 KYOCERA Corporation
+ */
+
 #include <linux/module.h>
 #include <linux/blkdev.h>
 #include <linux/file.h>
@@ -157,6 +162,18 @@ struct usb_descriptor_header *fsg_ss_function[] = {
 };
 EXPORT_SYMBOL_GPL(fsg_ss_function);
 
+/* Maxpacket and other transfer characteristics vary by speed. */
+static __maybe_unused struct usb_endpoint_descriptor *
+fsg_ep_desc(struct usb_gadget *g, struct usb_endpoint_descriptor *fs,
+		struct usb_endpoint_descriptor *hs,
+		struct usb_endpoint_descriptor *ss)
+{
+	if (gadget_is_superspeed(g) && g->speed == USB_SPEED_SUPER)
+		return ss;
+	else if (gadget_is_dualspeed(g) && g->speed == USB_SPEED_HIGH)
+		return hs;
+	return fs;
+}
 
  /*-------------------------------------------------------------------------*/
 
@@ -436,10 +453,12 @@ ssize_t fsg_store_file(struct fsg_lun *curlun, struct rw_semaphore *filesem,
 {
 	int		rc = 0;
 
+#if 0
 	if (curlun->prevent_medium_removal && fsg_lun_is_open(curlun)) {
 		LDBG(curlun, "eject attempt prevented\n");
 		return -EBUSY;				/* "Door is locked" */
 	}
+#endif
 
 	/* Remove a trailing newline */
 	if (count > 0 && buf[count-1] == '\n')

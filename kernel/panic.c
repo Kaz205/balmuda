@@ -8,6 +8,10 @@
  * This function is used through-out the kernel (including mm and fs)
  * to indicate a major problem.
  */
+/*
+ * This software is contributed or developed by KYOCERA Corporation.
+ * (C) 2020 KYOCERA Corporation
+ */
 #include <linux/debug_locks.h>
 #include <linux/sched/debug.h>
 #include <linux/interrupt.h>
@@ -29,6 +33,7 @@
 #include <linux/bug.h>
 #include <linux/ratelimit.h>
 #include <linux/debugfs.h>
+#include <linux/crash_reason.h>
 #include <asm/sections.h>
 #include <soc/qcom/minidump.h>
 
@@ -184,6 +189,7 @@ void panic(const char *fmt, ...)
 	if (vendor_panic_cb)
 		vendor_panic_cb(0);
 	pr_emerg("Kernel panic - not syncing: %s\n", buf);
+	set_smem_panic_info_data((const char *)buf);
 #ifdef CONFIG_DEBUG_BUGVERBOSE
 	/*
 	 * Avoid nested stack-dumping if a panic occurs during oops processing

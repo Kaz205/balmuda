@@ -1,3 +1,7 @@
+/*
+ * This software is contributed or developed by KYOCERA Corporation.
+ * (C) 2020 KYOCERA Corporation
+ */
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
  * Copyright (c) 2018-2020 The Linux Foundation. All rights reserved.
@@ -10,12 +14,54 @@
 #include "fg-alg.h"
 #include "qg-defs.h"
 
+/*-------*/
+struct oem_cycle_counter {
+	int				count;
+	int				increase_soc;
+	int				start_soc;
+	int				last_soc;
+};
+
+struct oem_online_time {
+	int				total_time;
+};
+
+enum {
+	CYCLE_COUNT = 0,
+	CONT_CHG,
+};
+
+enum {
+	BATT_CARE_MODE_INIT = -1,
+	BATT_CARE_MODE_OFF = 0,
+	BATT_CARE_MODE_ON = 1,
+};
+/*-------*/
+
 struct qg_batt_props {
 	const char		*batt_type_str;
 	int			float_volt_uv;
 	int			vbatt_full_mv;
 	int			fastchg_curr_ma;
 	int			qg_profile_version;
+
+	/* oem add */
+	int			oem_batt_capacity_mah;
+	int			oem_deterioration_thresh_good;
+	int			oem_deterioration_thresh_norm;
+	int			oem_deterioration_thresh_normtogood;
+	int			oem_deterioration_thresh_deadtonorm;
+	int			oem_float_volt_uv_design;
+	int			*oem_cycle_count_thresh;
+	int			*oem_cycle_count_fv_comp_mv;
+	int			oem_cycle_count_levels;
+	int			*oem_cont_chg_thresh;
+	int			*oem_cont_chg_fv_comp_mv;
+	int			oem_cont_chg_levels;
+	int			*oem_batt_temp_thresh;
+	int			*oem_cont_chg_factor;
+	int			*oem_cont_chg_factor_batt_care;
+	int			oem_cont_chg_factor_levels;
 };
 
 struct qg_irq_info {
@@ -75,6 +121,9 @@ struct qg_dt {
 	bool			multi_profile_load;
 	bool			tcss_enable;
 	bool			bass_enable;
+#ifdef CONFIG_OEM_WIRELESS_CHARGER
+	int			iterm_ma_wchg;
+#endif
 };
 
 struct qg_esr_data {
@@ -125,6 +174,9 @@ struct qpnp_qg {
 	struct power_supply	*dc_psy;
 	struct power_supply	*parallel_psy;
 	struct power_supply	*cp_psy;
+#ifdef CONFIG_OEM_WIRELESS_CHARGER
+	struct power_supply	*wchg_psy;
+#endif
 	struct qg_esr_data	esr_data[QG_MAX_ESR_COUNT];
 
 	/* status variable */
@@ -206,6 +258,16 @@ struct qpnp_qg {
 	struct cycle_counter	*counter;
 	/* ttf */
 	struct ttf		*ttf;
+
+	/* oem add */
+	struct votable				*fv_votable;
+	struct oem_cycle_counter	oem_cycle;
+	struct oem_online_time		oem_online;
+	struct delayed_work			oem_online_time_work;
+	int			oem_batt_chg_enabled;
+	int			oem_batt_care_mode;
+	int			oem_batt_care_float_volt_uv;
+	int			oem_batt_care_notification;
 };
 
 struct ocv_all {

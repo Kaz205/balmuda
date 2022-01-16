@@ -695,12 +695,12 @@ static struct clk_rcg2 gcc_sdcc1_ice_core_clk_src = {
 };
 
 static const struct freq_tbl ftbl_gcc_sdcc2_apps_clk_src[] = {
-	F(400000, P_BI_TCXO, 12, 1, 4),
+	F(384000, P_BI_TCXO, 2, 1, 25),
 	F(19200000, P_BI_TCXO, 1, 0, 0),
-	F(25000000, P_GPLL0_OUT_EVEN, 6, 1, 2),
-	F(50000000, P_GPLL0_OUT_EVEN, 6, 0, 0),
-	F(100000000, P_GPLL0_OUT_EVEN, 3, 0, 0),
-	F(202000000, P_GPLL9_OUT_MAIN, 4, 0, 0),
+	F(24000000, P_GPLL0_OUT_MAIN, 2, 2, 25),
+	F(48000000, P_GPLL0_OUT_MAIN, 1, 2, 25),
+	F(85714300, P_GPLL0_OUT_MAIN, 1, 2, 14),
+	F(171428600, P_GPLL0_OUT_MAIN, 1, 2, 7),
 	{ }
 };
 

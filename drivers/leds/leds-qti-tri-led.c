@@ -2,6 +2,10 @@
 /*
  * Copyright (c) 2018-2019, The Linux Foundation. All rights reserved.
  */
+/*
+ * This software is contributed or developed by KYOCERA Corporation.
+ * (C) 2021 KYOCERA Corporation
+*/
 
 #include <linux/bitops.h>
 #include <linux/device.h>
@@ -18,6 +22,8 @@
 #include <linux/pwm.h>
 #include <linux/regmap.h>
 #include <linux/types.h>
+#include <linux/kc_leds_drv.h>
+#include "kc_leds_drv.h"
 
 #define TRILED_REG_TYPE			0x04
 #define TRILED_REG_SUBTYPE		0x05
@@ -224,6 +230,9 @@ static int qpnp_tri_led_set(struct qpnp_led_dev *led)
 
 		if (period_ns < duty_ns && duty_ns != 0)
 			period_ns = duty_ns + 1;
+	} else if (led->led_setting.breath) {
+		duty_ns = led->led_setting.on_ms;
+		period_ns = led->led_setting.off_ms;
 	} else {
 		/* Use initial period if no blinking is required */
 		period_ns = led->pwm_setting.pre_period_ns;
@@ -264,16 +273,55 @@ static int qpnp_tri_led_set(struct qpnp_led_dev *led)
 		led->breathing = false;
 	}
 
+	kc_qti_led_info_get(led->id, &led->cdev);
+
 	return rc;
 }
 
-static int qpnp_tri_led_set_brightness(struct led_classdev *led_cdev,
+int qpnp_tri_led_brightness_set(struct led_classdev *led_cdev,
+		int brightness)
+{
+	struct qpnp_led_dev *led =
+		container_of(led_cdev, struct qpnp_led_dev, cdev);
+	int rc = 0;
+
+	dev_dbg(led->chip->dev, "[TRICOLOR]:%s brightness=%d\n", __func__, brightness);
+	mutex_lock(&led->lock);
+	if (brightness > LED_FULL)
+		brightness = LED_FULL;
+
+	if (brightness == led->led_setting.brightness &&
+			!led->blinking && !led->breathing) {
+		mutex_unlock(&led->lock);
+		return 0;
+	}
+
+	led->led_setting.brightness = brightness;
+	if (!!brightness)
+		led->led_setting.off_ms = 0;
+	else
+		led->led_setting.on_ms = 0;
+	led->led_setting.blink = false;
+	led->led_setting.breath = false;
+
+	rc = qpnp_tri_led_set(led);
+	if (rc)
+		dev_err(led->chip->dev, "Set led failed for %s, rc=%d\n",
+				led->label, rc);
+
+	mutex_unlock(&led->lock);
+
+	return rc;
+}
+
+int qpnp_tri_led_set_brightness(struct led_classdev *led_cdev,
 		enum led_brightness brightness)
 {
 	struct qpnp_led_dev *led =
 		container_of(led_cdev, struct qpnp_led_dev, cdev);
 	int rc = 0;
 
+	dev_dbg(led->chip->dev, "[TRICOLOR]:%s brightness=%d\n", __func__, brightness);
 	mutex_lock(&led->lock);
 	if (brightness > LED_FULL)
 		brightness = LED_FULL;
@@ -305,10 +353,22 @@ static int qpnp_tri_led_set_brightness(struct led_classdev *led_cdev,
 static enum led_brightness qpnp_tri_led_get_brightness(
 			struct led_classdev *led_cdev)
 {
+    // struct qpnp_led_dev *led =
+		// container_of(led_cdev, struct qpnp_led_dev, cdev);
 	return led_cdev->brightness;
 }
 
-static int qpnp_tri_led_set_blink(struct led_classdev *led_cdev,
+void kc_leds_set_lightparam(struct led_classdev *led_cdev, bool blink, bool breath, int brightness)
+{
+    struct qpnp_led_dev *led =
+		container_of(led_cdev, struct qpnp_led_dev, cdev);
+
+    led->led_setting.blink = blink;
+    led->led_setting.breath = breath;
+	led->led_setting.brightness = brightness;
+}
+
+int qpnp_tri_led_set_blink(struct led_classdev *led_cdev,
 		unsigned long *on_ms, unsigned long *off_ms)
 {
 	struct qpnp_led_dev *led =
@@ -335,8 +395,9 @@ static int qpnp_tri_led_set_blink(struct led_classdev *led_cdev,
 	} else {
 		led->led_setting.on_ms = *on_ms;
 		led->led_setting.off_ms = *off_ms;
-		led->led_setting.blink = true;
-		led->led_setting.breath = false;
+		led->led_setting.brightness = led->cdev.brightness;
+		// led->led_setting.blink = true
+		// led->led_setting.breath = false;
 	}
 
 	rc = qpnp_tri_led_set(led);
@@ -366,7 +427,7 @@ static ssize_t breath_store(struct device *dev, struct device_attribute *attr,
 	struct led_classdev *led_cdev = dev_get_drvdata(dev);
 	struct qpnp_led_dev *led =
 		container_of(led_cdev, struct qpnp_led_dev, cdev);
-
+    
 	rc = kstrtobool(buf, &breath);
 	if (rc < 0)
 		return rc;
@@ -399,7 +460,18 @@ static const struct attribute *breath_attrs[] = {
 static int qpnp_tri_led_register(struct qpnp_tri_led_chip *chip)
 {
 	struct qpnp_led_dev *led;
-	int rc, i, j;
+	int rc, i, j, rgb_en[3];
+	u8 val;
+
+	rc = qpnp_tri_led_read(chip, TRILED_REG_EN_CTL, &val);
+	if (rc < 0) {
+		dev_err(chip->dev, "Read REG_SUBTYPE failed, rc=%d\n", rc);
+		return rc;
+	}
+
+	rgb_en[0] = (val & 0x80);
+	rgb_en[1] = (val & 0x40);
+	rgb_en[2] = (val & 0x20);
 
 	for (i = 0; i < chip->num_leds; i++) {
 		led = &chip->leds[i];
@@ -412,6 +484,20 @@ static int qpnp_tri_led_register(struct qpnp_tri_led_chip *chip)
 		led->cdev.default_trigger = led->default_trigger;
 		led->cdev.brightness = LED_OFF;
 		led->cdev.flags |= LED_KEEP_TRIGGER;
+
+		if (rgb_en[i]) {
+			rc = qpnp_tri_led_set_brightness(&chip->leds[i].cdev, LED_FULL);
+
+			if (rc < 0) {
+				dev_err(chip->dev, "set_brightness error, rc=%d\n", rc);
+				goto err_out;
+			}
+
+
+			led->led_setting.on_ms = 0;
+			led->led_setting.off_ms = 0;
+			led->blinking = true;
+		}
 
 		rc = devm_led_classdev_register(chip->dev, &led->cdev);
 		if (rc < 0) {
@@ -566,7 +652,7 @@ static int qpnp_tri_led_probe(struct platform_device *pdev)
 	struct qpnp_tri_led_chip *chip;
 	int rc = 0;
 
-	chip = devm_kzalloc(&pdev->dev, sizeof(*chip), GFP_KERNEL);
+    chip = devm_kzalloc(&pdev->dev, sizeof(*chip), GFP_KERNEL);
 	if (!chip)
 		return -ENOMEM;
 

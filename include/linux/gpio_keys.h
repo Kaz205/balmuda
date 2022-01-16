@@ -1,6 +1,17 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 #ifndef _GPIO_KEYS_H
 #define _GPIO_KEYS_H
+/*
+ * This software is contributed or developed by KYOCERA Corporation.
+ * (C) 2012 KYOCERA Corporation
+ * (C) 2013 KYOCERA Corporation
+ * (C) 2014 KYOCERA Corporation
+ * (C) 2015 KYOCERA Corporation
+ * (C) 2016 KYOCERA Corporation
+ * (C) 2017 KYOCERA Corporation
+ * (C) 2018 KYOCERA Corporation
+ * (C) 2019 KYOCERA Corporation
+ */
 
 #include <linux/types.h>
 
@@ -34,6 +45,8 @@ struct gpio_keys_button {
 	bool can_disable;
 	int value;
 	unsigned int irq;
+	unsigned int on_chattering_num;
+	unsigned int off_chattering_num;
 };
 
 /**

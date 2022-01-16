@@ -2,6 +2,10 @@
 /*
  * Copyright (c) 2010-2020, The Linux Foundation. All rights reserved.
  */
+/*
+ * This software is contributed or developed by KYOCERA Corporation.
+ * (C) 2020 KYOCERA Corporation
+ */
 
 #include <linux/module.h>
 #include <linux/string.h>
@@ -35,6 +39,8 @@
 #include <asm/setup.h>
 #define CREATE_TRACE_POINTS
 #include <trace/events/trace_msm_pil_event.h>
+#include <linux/soc/qcom/smem.h>
+#include <linux/reboot.h>
 
 #include "peripheral-loader.h"
 
@@ -66,6 +72,10 @@ static void __iomem *pil_info_base;
 static struct md_global_toc *g_md_toc;
 
 void *pil_ipc_log;
+
+#define QFPROM_SECBOOT_ON           (0x4E4F4253)
+extern void set_auth_error_mode(void);
+int is_secure_boot_err = 0;
 
 /**
  * proxy_timeout - Override for proxy vote timeouts
@@ -1227,6 +1237,7 @@ int pil_boot(struct pil_desc *desc)
 	struct pil_priv *priv = desc->priv;
 	bool mem_protect = false;
 	bool hyp_assign = false;
+	uint32_t* secboot_mode = (uint32_t*)kc_smem_alloc(SMEM_SECUREBOOT_FLAG, KCC_SMEM_SECUREBOOT_FLAG_SIZE);
 
 	ret = pil_notify_aop(desc, "on");
 	if (ret < 0) {
@@ -1260,6 +1271,11 @@ int pil_boot(struct pil_desc *desc)
 	if (memcmp(ehdr->e_ident, ELFMAG, SELFMAG)) {
 		pil_err(desc, "Not an elf header\n");
 		ret = -EIO;
+		if(*secboot_mode == QFPROM_SECBOOT_ON)
+		{
+			set_auth_error_mode();
+			kernel_restart("oem-1");
+		}
 		goto release_fw;
 	}
 
@@ -1291,6 +1307,11 @@ int pil_boot(struct pil_desc *desc)
 		ret = desc->ops->init_image(desc, fw->data, fw->size);
 	if (ret) {
 		pil_err(desc, "Initializing image failed(rc:%d)\n", ret);
+		if(*secboot_mode == QFPROM_SECBOOT_ON && is_secure_boot_err)
+		{
+			set_auth_error_mode();
+			kernel_restart("oem-1");
+		}
 		goto err_boot;
 	}
 
@@ -1365,6 +1386,11 @@ int pil_boot(struct pil_desc *desc)
 	ret = desc->ops->auth_and_reset(desc);
 	if (ret) {
 		pil_err(desc, "Failed to bring out of reset(rc:%d)\n", ret);
+		if(*secboot_mode == QFPROM_SECBOOT_ON && is_secure_boot_err)
+		{
+			set_auth_error_mode();
+			kernel_restart("oem-1");
+		}
 		goto err_auth_and_reset;
 	}
 	pil_log("reset_done", desc);

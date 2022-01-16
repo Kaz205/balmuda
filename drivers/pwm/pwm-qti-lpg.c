@@ -95,11 +95,13 @@
 #define LPG_HI_LO_IDX_MASK		GENMASK(5, 0)
 
 /* LUT module registers */
-#define REG_LPG_LUT_1_LSB		0x42
+#define REG_LPG_LUT_0_LSB		0x40
+//#define REG_LPG_LUT_1_LSB		0x42
 #define REG_LPG_LUT_RAMP_CONTROL	0xc8
 
 #define LPG_LUT_VALUE_MSB_MASK		BIT(0)
-#define LPG_LUT_COUNT_MAX		47
+//#define LPG_LUT_COUNT_MAX		47
+#define LPG_LUT_COUNT_MAX		49
 
 /* LPG config settings in SDAM */
 #define SDAM_REG_PBS_SEQ_EN			0x42
@@ -138,6 +140,9 @@ static const int pwm_size[NUM_PWM_SIZE] = {6, 9};
 static const int clk_freq_hz[NUM_PWM_CLK] = {1024, 32768, 19200000};
 static const int clk_prediv[NUM_CLK_PREDIV] = {1, 3, 5, 6};
 static const int pwm_exponent[NUM_PWM_EXP] = {0, 1, 2, 3, 4, 5, 6, 7};
+
+static const int fade1[47] = {120, 120, 120, 120, 118, 116, 114, 112, 110, 108, 106, 104, 102, 100, 98, 96, 94, 92, 90, 88, 86, 84, 82, 80, 78, 75, 72, 69, 66, 63, 60, 57, 54, 50, 46, 42, 38, 34, 30, 26, 22, 18, 15, 12, 9, 5, 2};
+static const int fade2[47] = {120, 120, 120, 120,   0,   0,   0, 120, 120, 116, 112, 108, 104, 100, 98, 96, 94, 92, 90, 88, 86, 84, 82, 80, 78, 75, 72, 69, 66, 63, 60, 57, 54, 50, 46, 42, 38, 34, 30, 26, 22, 18, 15, 12, 9, 5, 2};
 
 struct lpg_ramp_config {
 	u16			step_ms;
@@ -408,6 +413,11 @@ static int qpnp_lpg_set_pwm_config(struct qpnp_lpg_channel *lpg)
 	u8 val, mask, shift;
 	int pwm_size_idx, pwm_clk_idx, prediv_idx, clk_exp_idx;
 
+	dev_err(lpg->chip->dev, "%s src_sel = %d\n",__func__, lpg->src_sel);
+
+	if (lpg->src_sel == LUT_PATTERN)
+		return 0;
+
 	pwm_size_idx = __find_index_in_array(lpg->pwm_config.pwm_size,
 			pwm_size, ARRAY_SIZE(pwm_size));
 	pwm_clk_idx = __find_index_in_array(lpg->pwm_config.pwm_clk,
@@ -449,8 +459,8 @@ static int qpnp_lpg_set_pwm_config(struct qpnp_lpg_channel *lpg)
 		return rc;
 	}
 
-	if (lpg->src_sel == LUT_PATTERN)
-		return 0;
+//	if (lpg->src_sel == LUT_PATTERN)
+//		return 0;
 
 	val = lpg->pwm_config.pwm_value >> 8;
 	mask = LPG_PWM_VALUE_MSB_MASK;
@@ -461,6 +471,8 @@ static int qpnp_lpg_set_pwm_config(struct qpnp_lpg_channel *lpg)
 		return rc;
 	}
 
+	dev_err(lpg->chip->dev, "%s Write LPG_PWM_VALUE_MSB = %d\n",__func__, val);
+
 	val = lpg->pwm_config.pwm_value & LPG_PWM_VALUE_LSB_MASK;
 	rc = qpnp_lpg_write(lpg, REG_LPG_PWM_VALUE_LSB, val);
 	if (rc < 0) {
@@ -468,6 +480,8 @@ static int qpnp_lpg_set_pwm_config(struct qpnp_lpg_channel *lpg)
 							rc);
 		return rc;
 	}
+
+	dev_err(lpg->chip->dev, "%s Write LPG_PWM_VALUE_LSB = %d\n",__func__, val);
 
 	val = LPG_PWM_VALUE_SYNC;
 	rc = qpnp_lpg_write(lpg, REG_LPG_PWM_SYNC, val);
@@ -593,10 +607,13 @@ static int qpnp_lpg_set_lut_pattern(struct qpnp_lpg_channel *lpg,
 
 	/* Program LUT pattern */
 	mutex_lock(&lut->lock);
-	addr = REG_LPG_LUT_1_LSB + lpg->ramp_config.lo_idx * 2;
+//	addr = REG_LPG_LUT_1_LSB + lpg->ramp_config.lo_idx * 2;
+	addr = REG_LPG_LUT_0_LSB + lpg->ramp_config.lo_idx * 2;
 	for (i = 0; i < length; i++) {
-		full_duty_value = 1 << lpg->pwm_config.pwm_size;
-		pwm_values[i] = pattern[i] * full_duty_value / 100;
+//		full_duty_value = 1 << lpg->pwm_config.pwm_size;
+//		pwm_values[i] = pattern[i] * full_duty_value / 100;
+		full_duty_value = 512;
+		pwm_values[i] = pattern[i];
 
 		if (unlikely(pwm_values[i] > full_duty_value)) {
 			dev_err(lpg->chip->dev, "PWM value %d exceed the max %d\n",
@@ -824,7 +841,8 @@ static void __qpnp_lpg_calc_pwm_duty(u64 period_ns, u64 duty_ns,
 static int qpnp_lpg_config(struct qpnp_lpg_channel *lpg,
 		u64 duty_ns, u64 period_ns)
 {
-	int rc;
+	int rc, i, color;
+	u32 *pwm_val_table;
 
 	if (duty_ns > period_ns) {
 		dev_err(lpg->chip->dev, "Duty %lluns is larger than period %lluns\n",
@@ -832,13 +850,44 @@ static int qpnp_lpg_config(struct qpnp_lpg_channel *lpg,
 		return -EINVAL;
 	}
 
+	pwm_val_table = kcalloc(lpg->ramp_config.pattern_length, sizeof(u32), GFP_KERNEL);
+	if (!pwm_val_table)
+		return -ENOMEM;
+
+//	dev_err(lpg->chip->dev, "duty = %llu[ns], period = %llu[ns]\n",	duty_ns, period_ns);
+
+	color = (period_ns & 0x00000007);
+
+//	dev_err(lpg->chip->dev, "color = %d\n",	color);
+
+	for (i = 0; i < lpg->ramp_config.pattern_length; i++) {
+		if (duty_ns > 200)
+		    pwm_val_table[i] = fade1[i];
+		else
+		    pwm_val_table[i] = fade2[i];
+
+//		dev_err(lpg->chip->dev, "%s pwm_val_table[%d] = %d\n",__func__, i, pwm_val_table[i]);
+	}
+
+	if (duty_ns > 200) {
+		lpg->ramp_config.step_ms = 41;
+	} else {
+		lpg->ramp_config.step_ms = 54;
+	}
+
+	dev_err(lpg->chip->dev, "%s step_ms = %d, pause_lo_count = %d, pause_ho_count = %d\n",__func__, lpg->ramp_config.step_ms, lpg->ramp_config.pause_lo_count, lpg->ramp_config.pause_hi_count);
+	dev_err(lpg->chip->dev, "%s src_sel = %d\n",__func__,lpg->src_sel);
+
 	if (period_ns != lpg->current_period_ns) {
 		__qpnp_lpg_calc_pwm_period(period_ns, &lpg->pwm_config);
 
 		/* program LUT if PWM period is changed */
 		if (lpg->src_sel == LUT_PATTERN) {
+//			rc = qpnp_lpg_set_lut_pattern(lpg,
+//					lpg->ramp_config.pattern,
+//					lpg->ramp_config.pattern_length);
 			rc = qpnp_lpg_set_lut_pattern(lpg,
-					lpg->ramp_config.pattern,
+					pwm_val_table,
 					lpg->ramp_config.pattern_length);
 			if (rc < 0) {
 				dev_err(lpg->chip->dev, "set LUT pattern failed for LPG%d, rc=%d\n",
@@ -846,6 +895,13 @@ static int qpnp_lpg_config(struct qpnp_lpg_channel *lpg,
 				return rc;
 			}
 			lpg->lut_written = true;
+
+			rc = qpnp_lpg_set_ramp_config(lpg);
+			if (rc < 0) {
+				dev_err(lpg->chip->dev, "Config LPG%d ramping failed, rc=%d\n",
+						lpg->lpg_idx, rc);
+				return rc;
+			}
 		}
 	}
 
@@ -860,8 +916,12 @@ static int qpnp_lpg_config(struct qpnp_lpg_channel *lpg,
 		return rc;
 	}
 
-	lpg->current_period_ns = period_ns;
-	lpg->current_duty_ns = duty_ns;
+//	lpg->current_period_ns = period_ns;
+//	lpg->current_duty_ns = duty_ns;
+	lpg->current_period_ns = period_ns * 2;
+	lpg->current_duty_ns = duty_ns * 2;
+
+	kfree(pwm_val_table);
 
 	return rc;
 }
@@ -944,6 +1004,8 @@ static int qpnp_lpg_pwm_src_enable(struct qpnp_lpg_channel *lpg, bool en)
 	mask = LPG_PWM_SRC_SELECT_MASK | LPG_EN_LPG_OUT_BIT |
 					LPG_EN_RAMP_GEN_MASK;
 	val = lpg->src_sel << LPG_PWM_SRC_SELECT_SHIFT;
+
+	dev_err(chip->dev, "%s src_sel = %d\n",__func__, lpg->src_sel);
 
 	if (lpg->src_sel == LUT_PATTERN && !chip->use_sdam)
 		val |= 1 << LPG_EN_RAMP_GEN_SHIFT;
@@ -1034,10 +1096,12 @@ static int qpnp_lpg_pwm_set_output_type(struct pwm_chip *pwm_chip,
 		return 0;
 	}
 
+	dev_err(pwm_chip->dev, "%s src_sel = %d\n",__func__, lpg->src_sel);
+
 	src_sel = (output_type == PWM_OUTPUT_MODULATED) ?
 				LUT_PATTERN : PWM_VALUE;
-	if (src_sel == lpg->src_sel)
-		return 0;
+//	if (src_sel == lpg->src_sel)
+//		return 0;
 
 	is_enabled = pwm_is_enabled(pwm);
 	if (is_enabled) {
@@ -1056,6 +1120,7 @@ static int qpnp_lpg_pwm_set_output_type(struct pwm_chip *pwm_chip,
 		}
 	}
 
+#if 1
 	if (src_sel == LUT_PATTERN) {
 		/* program LUT if it's never been programmed */
 		if (!lpg->lut_written) {
@@ -1077,6 +1142,7 @@ static int qpnp_lpg_pwm_set_output_type(struct pwm_chip *pwm_chip,
 			return rc;
 		}
 	}
+#endif
 
 	lpg->src_sel = src_sel;
 
@@ -1087,6 +1153,8 @@ static int qpnp_lpg_pwm_set_output_type(struct pwm_chip *pwm_chip,
 							lpg->lpg_idx, rc);
 			return rc;
 		}
+
+		dev_err(pwm_chip->dev, "%s Config PWM for channel %d\n",__func__, lpg->lpg_idx);
 
 		rc = qpnp_lpg_pwm_src_enable(lpg, true);
 		if (rc < 0) {
@@ -1191,7 +1259,8 @@ static int qpnp_lpg_pwm_enable(struct pwm_chip *pwm_chip,
 		}
 	}
 
-	rc = qpnp_lpg_set_glitch_removal(lpg, true);
+	rc = qpnp_lpg_set_glitch_removal(lpg, false);
+//	rc = qpnp_lpg_set_glitch_removal(lpg, true);
 	if (rc < 0) {
 		dev_err(lpg->chip->dev, "Enable glitch-removal failed, rc=%d\n",
 							rc);

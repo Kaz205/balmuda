@@ -2,6 +2,10 @@
 /*
  * Copyright (c) 2013-2019, The Linux Foundation. All rights reserved.
  */
+/*
+ * This software is contributed or developed by KYOCERA Corporation.
+ * (C) 2020 KYOCERA Corporation
+ */
 
 #include <linux/delay.h>
 #include <linux/err.h>
@@ -18,6 +22,9 @@
 #include <linux/input/qpnp-power-on.h>
 #include <linux/of_address.h>
 
+#include <linux/kcjlog.h>
+#include <linux/crash_reason.h>
+
 #include <asm/cacheflush.h>
 #include <asm/system_misc.h>
 #include <asm/memory.h>
@@ -26,6 +33,11 @@
 #include <soc/qcom/restart.h>
 #include <soc/qcom/watchdog.h>
 #include <soc/qcom/minidump.h>
+
+#ifdef CONFIG_EX_RAMDUMP
+#include <linux/kc_phymap.h>
+#include <linux/soc/qcom/smem.h>
+#endif
 
 #define EMERGENCY_DLOAD_MAGIC1    0x322A4F99
 #define EMERGENCY_DLOAD_MAGIC2    0xC67E4350
@@ -48,6 +60,18 @@
 #define KASLR_OFFSET_PROP "qcom,msm-imem-kaslr_offset"
 #define KASLR_OFFSET_BIT_MASK	0x00000000FFFFFFFF
 
+#ifdef CONFIG_EX_RAMDUMP
+#define DUMP_RESET_FLAG_MAGIC     0x21525245
+#define DUMP_RESET_FLAG_RAM_SIZE  (4)
+#define DUMP_RESET_FLAG_RAM_BASE  (MSM_UNINIT_RAM_BASE + (MSM_UNINIT_RAM_SIZE - DUMP_RESET_FLAG_RAM_SIZE))
+#define DUMP_DLOAD_MODE_MAGIC1    0x444D4152
+#define DUMP_DLOAD_MODE_MAGIC2    0x4453504D
+#define DUMP_DM_MAGIC1_OFFSET     254
+#define DUMP_DM_MAGIC2_OFFSET     255
+#define DUMP_SMEM_KERR_LOG_SIZE   1024
+#define DUMP_DOWNLOAD_FLAG_MAGIC  0x4D444133
+#endif
+
 static int restart_mode;
 static void *restart_reason, *dload_type_addr;
 static bool scm_pmic_arbiter_disable_supported;
@@ -57,12 +81,20 @@ static void __iomem *msm_ps_hold;
 static phys_addr_t tcsr_boot_misc_detect;
 static void scm_disable_sdi(void);
 
+#ifdef CONFIG_EX_RAMDUMP
+static void __iomem *reset_flag = NULL;
+#endif
+
 /*
  * Runtime could be only changed value once.
  * There is no API from TZ to re-enable the registers.
  * So the SDI cannot be re-enabled when it already by-passed.
  */
+#ifdef CONFIG_EX_RAMDUMP
+static int download_mode = 0;
+#else
 static int download_mode = 1;
+#endif
 static struct kobject dload_kobj;
 
 static int in_panic;
@@ -132,6 +164,29 @@ static struct kobj_type reset_ktype = {
 	.sysfs_ops	= &reset_sysfs_ops,
 };
 
+#define IS_VBUS_ACTIVE_AVAILABLE
+#ifdef IS_VBUS_ACTIVE_AVAILABLE
+#define DIAG_PWROFF_MODE_CMD_ONLY         0x01
+#define DIAG_PWROFF_MODE_CMD_WITH_ENDSEQ  0x02
+#define DIAG_PWROFF_MODE_COMPLETE         0xFF
+
+static int pwroff_mode;
+module_param_named(pwroff_mode, pwroff_mode, int,
+                S_IRUGO | S_IWUSR | S_IWGRP);
+
+bool msm_is_pwroff_mode(void){
+       if (pwroff_mode == DIAG_PWROFF_MODE_CMD_WITH_ENDSEQ){
+               return true;
+       }else{
+               return false;
+       }
+}
+
+void msm_set_pwroff_complete(void){
+       pwroff_mode = DIAG_PWROFF_MODE_COMPLETE;
+}
+#endif /* IS_VBUS_ACTIVE_AVAILABLE */
+
 static int panic_prep_restart(struct notifier_block *this,
 			      unsigned long event, void *ptr)
 {
@@ -185,6 +240,42 @@ static bool get_dload_mode(void)
 {
 	return dload_mode_enabled;
 }
+
+#ifdef CONFIG_EX_RAMDUMP
+static void set_reset_flag(uint32_t magic)
+{
+	if ( NULL != reset_flag )
+	{
+		writel((unsigned int)magic, reset_flag);
+	}
+}
+
+static void reset_flag_init(void)
+{
+	uint32_t magic;
+
+	if ( request_mem_region(DUMP_RESET_FLAG_RAM_BASE, DUMP_RESET_FLAG_RAM_SIZE, "reset_flag"))
+	{
+		reset_flag  = ioremap_nocache(DUMP_RESET_FLAG_RAM_BASE, DUMP_RESET_FLAG_RAM_SIZE);
+		if( NULL != reset_flag)
+		{
+			magic = (uint32_t)readl(reset_flag);
+			if(DUMP_RESET_FLAG_MAGIC != magic) {
+				set_reset_flag(DUMP_RESET_FLAG_MAGIC);
+			}
+		}
+		else
+		{
+			pr_err("%s:Error unable to ioremap\n", __func__);
+		}
+	}
+	else
+	{
+		pr_err("%s:Error unable to get mem region\n", __func__);
+	}
+}
+
+#endif
 
 static void enable_emergency_dload_mode(void)
 {
@@ -441,6 +532,13 @@ static void scm_disable_sdi(void)
 void msm_set_restart_mode(int mode)
 {
 	restart_mode = mode;
+#if defined(CONFIG_EX_RAMDUMP)
+	set_reset_flag(DUMP_DOWNLOAD_FLAG_MAGIC);
+	if (mode == RESTART_DLOAD) {
+		download_mode = mode;
+		pr_err("[%s:%d] download_mode = 0x%d\n", __func__, __LINE__, download_mode);
+	}
+#endif
 }
 EXPORT_SYMBOL(msm_set_restart_mode);
 
@@ -464,9 +562,19 @@ static void halt_spmi_pmic_arbiter(void)
 	}
 }
 
+static bool auth_err_reboot = false;
+void set_auth_error_mode(void)
+{
+	auth_err_reboot = true;
+}
+
 static void msm_restart_prepare(const char *cmd)
 {
 	bool need_warm_reset = false;
+#ifdef CONFIG_EX_RAMDUMP
+	bool android_system_crash = false;
+	bool dm_verity = false;
+#endif
 	/* Write download mode flags if we're panic'ing
 	 * Write download mode flags if restart_mode says so
 	 * Kill download mode if master-kill switch is set
@@ -474,6 +582,19 @@ static void msm_restart_prepare(const char *cmd)
 
 	set_dload_mode(download_mode &&
 			(in_panic || restart_mode == RESTART_DLOAD));
+#ifdef CONFIG_EX_RAMDUMP
+	if(in_panic == 0) {
+		android_system_crash = (strcmp(cmd, "android_system_crash") == 0);
+		dm_verity = (strcmp(cmd, "dm-verity device corrupted") == 0);
+		if( cmd == NULL && !(auth_err_reboot)) {
+			set_reset_flag(0x00000000);
+		}
+		else if(!android_system_crash && !dm_verity) {
+			set_reset_flag(0x00000000);
+		}
+		set_dload_mode(download_mode && (android_system_crash || dm_verity));
+	}
+#endif
 
 	if (qpnp_pon_check_hard_reset_stored()) {
 		/* Set warm reset as true when device is in dload mode */
@@ -490,10 +611,24 @@ static void msm_restart_prepare(const char *cmd)
 		pr_info("Forcing a warm reset of the system\n");
 
 	/* Hard reset the PMIC unless memory contents must be maintained. */
+#if defined(CONFIG_ANDROID_KCJLOG)
+	if (force_warm_reboot || need_warm_reset) {
+		qpnp_pon_system_pwr_off(PON_POWER_OFF_WARM_RESET);
+	}
+	else {
+		if(in_panic == 1 || auth_err_reboot) {
+			qpnp_pon_system_pwr_off(PON_POWER_OFF_WARM_RESET);
+		}
+		else {
+			qpnp_pon_system_pwr_off(PON_POWER_OFF_HARD_RESET);
+		}
+	}
+#else
 	if (force_warm_reboot || need_warm_reset)
 		qpnp_pon_system_pwr_off(PON_POWER_OFF_WARM_RESET);
 	else
 		qpnp_pon_system_pwr_off(PON_POWER_OFF_HARD_RESET);
+#endif
 
 	if (cmd != NULL) {
 		if (!strncmp(cmd, "bootloader", 10)) {
@@ -525,12 +660,20 @@ static void msm_restart_prepare(const char *cmd)
 			int ret;
 
 			ret = kstrtoul(cmd + 4, 16, &code);
-			if (!ret)
-				__raw_writel(0x6f656d00 | (code & 0xff),
-					     restart_reason);
+			if (!ret && ((code & 0xff) != 1 || auth_err_reboot))
+				qpnp_pon_set_restart_reason(
+					PON_RESTART_REASON_AUTH_ERROR_MODE);
 		} else if (!strncmp(cmd, "edl", 3)) {
 			enable_emergency_dload_mode();
 		} else {
+#if defined(CONFIG_ANDROID_KCJLOG)
+			if (!strcmp(cmd, "android_system_crash")) {
+				qpnp_pon_system_pwr_off(PON_POWER_OFF_WARM_RESET);
+			}
+			if (!strcmp(cmd, "kdfs_reboot")) {
+				qpnp_pon_system_pwr_off(PON_POWER_OFF_WARM_RESET);
+			}
+#endif
 			__raw_writel(0x77665501, restart_reason);
 		}
 	}
@@ -570,6 +713,26 @@ static void deassert_ps_hold(void)
 
 static void do_msm_restart(enum reboot_mode reboot_mode, const char *cmd)
 {
+#if defined(CONFIG_ANDROID_KCJLOG)
+	if(in_panic == 1 || auth_err_reboot) {
+		set_smem_kcjlog(SYSTEM_KERNEL, KIND_PANIC);
+		set_smem_crash_info_data(" ");
+	}
+	if (cmd != NULL) {
+		if (strcmp(cmd, "android_system_crash") == 0) {
+			set_smem_kcjlog(SYSTEM_ANDROID, KIND_SYS_SERVER);
+			set_smem_crash_info_data(" ");
+		} else if (strcmp(cmd, "kdfs_reboot") == 0) {
+			set_smem_kcjlog(SYSTEM_ANDROID, KIND_KDFS_REBOOT);
+			set_smem_crash_info_data(" ");
+		} else if (strcmp(cmd, "dm-verity device corrupted") == 0) {
+			set_smem_kcjlog(SYSTEM_DM_VERITY, KIND_DEVICE_CORRUPTED);
+			set_smem_crash_info_data(" ");
+		}
+	}
+	set_kcj_crash_info();
+#endif
+
 	pr_notice("Going down for restart now\n");
 
 	msm_restart_prepare(cmd);
@@ -588,14 +751,46 @@ static void do_msm_restart(enum reboot_mode reboot_mode, const char *cmd)
 	msleep(10000);
 }
 
+#ifdef IS_VBUS_ACTIVE_AVAILABLE
+extern bool is_vbus_active(void);
+static void oem_do_msm_poweroff_prepare(void)
+{
+        bool pwroff_mode,vbus_monit;
+        int loop_count = 0;
+        pwroff_mode = msm_is_pwroff_mode();
+        if (pwroff_mode == true ) {
+                msm_set_pwroff_complete();
+                for (;;) {
+                        vbus_monit = is_vbus_active();
+                        if (vbus_monit==false){
+                                break;
+                        }
+                        msleep(100);
+                        pr_debug("Wait VBUS OFF!!!\n");
+                        if((loop_count % 100) == 0) {
+                            pr_debug("Wait VBUS OFF!!! loop_count=%d\n", loop_count);
+                        }
+                        loop_count++;
+                }
+        }
+}
+#endif /* IS_VBUS_ACTIVE_AVAILABLE */
+
 static void do_msm_poweroff(void)
 {
+#if defined(CONFIG_ANDROID_KCJLOG)
+	clear_kcj_crash_info();
+#endif
+
 	pr_notice("Powering off the SoC\n");
 
 	set_dload_mode(0);
 	scm_disable_sdi();
 	qpnp_pon_system_pwr_off(PON_POWER_OFF_SHUTDOWN);
 
+#ifdef CONFIG_EX_RAMDUMP
+	set_reset_flag(0x00000000);
+#endif
 	halt_spmi_pmic_arbiter();
 	deassert_ps_hold();
 
@@ -635,6 +830,10 @@ static int msm_restart_probe(struct platform_device *pdev)
 	if (mem)
 		tcsr_boot_misc_detect = mem->start;
 
+#ifdef IS_VBUS_ACTIVE_AVAILABLE
+        pm_power_off_prepare = oem_do_msm_poweroff_prepare;
+#endif /* IS_VBUS_ACTIVE_AVAILABLE */
+
 	pm_power_off = do_msm_poweroff;
 	arm_pm_restart = do_msm_restart;
 
@@ -651,6 +850,9 @@ static int msm_restart_probe(struct platform_device *pdev)
 	force_warm_reboot = of_property_read_bool(dev->of_node,
 						"qcom,force-warm-reboot");
 
+#ifdef CONFIG_EX_RAMDUMP
+	reset_flag_init();
+#endif
 	return 0;
 
 err_restart_reason:
@@ -672,6 +874,16 @@ static struct platform_driver msm_restart_driver = {
 	},
 };
 
+#ifdef CONFIG_EX_RAMDUMP
+static int __init get_download_mode_opt(char *line)
+{
+	get_option(&line, &download_mode);
+	pr_notice("get_option download_mode=%d\n",download_mode);
+	return 1;
+}
+
+__setup("download_mode_opt=", get_download_mode_opt);
+#endif
 static int __init msm_restart_init(void)
 {
 	return platform_driver_register(&msm_restart_driver);

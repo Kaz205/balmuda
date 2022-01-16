@@ -3,6 +3,10 @@
  * Copyright (c) 2015, Sony Mobile Communications AB.
  * Copyright (c) 2012-2013, 2018-2020 The Linux Foundation. All rights reserved.
  */
+/*
+ * This software is contributed or developed by KYOCERA Corporation.
+ * (C) 2020 KYOCERA Corporation
+ */
 
 #include <linux/hwspinlock.h>
 #include <linux/io.h>
@@ -1193,6 +1197,204 @@ static void __exit qcom_smem_exit(void)
 	platform_driver_unregister(&qcom_smem_driver);
 }
 module_exit(qcom_smem_exit)
+
+typedef struct {
+	uint64_t chg_param[ ( KCC_SMEM_CHG_PARAM_SIZE + (sizeof( uint64_t )-1) ) / sizeof( uint64_t ) ];
+	uint64_t kerr_log[ ( KCC_SMEM_KERR_LOG_SIZE + (sizeof( uint64_t )-1) ) / sizeof( uint64_t ) ];
+	uint64_t crash_log[ ( KCC_SMEM_CRASH_LOG_SIZE + (sizeof( uint64_t )-1)) / sizeof( uint64_t ) ];
+	uint64_t factory_cmdline[ ( KCC_SMEM_FACTORY_CMDLINE_SIZE + (sizeof( uint64_t )-1) ) / sizeof( uint64_t ) ];
+	uint64_t factory_options[ ( KCC_SMEM_FACTORY_OPTIONS_SIZE + (sizeof( uint64_t )-1) ) / sizeof( uint64_t ) ];
+	uint64_t ddr_data_info[ ( KCC_SMEM_DDR_DATA_INFO_SIZE + (sizeof( uint64_t )-1) ) / sizeof( uint64_t ) ];
+	uint64_t kc_wm_uuid[ ( KCC_SMEM_KC_WM_UUID_SIZE + (sizeof( uint64_t )-1) ) / sizeof( uint64_t ) ];
+	uint64_t secureboot_flag[ ( KCC_SMEM_SECUREBOOT_FLAG_SIZE + (sizeof( uint64_t )-1) ) / sizeof( uint64_t ) ];
+	uint64_t bfss_data[ ( KCC_SMEM_BFSS_DATA_SIZE + (sizeof( uint64_t )-1) ) / sizeof( uint64_t ) ];
+	uint64_t kc_power_on_status_info[ ( KCC_SMEM_KC_POWER_ON_STATUS_INFO_SIZE + (sizeof( uint64_t )-1) ) / sizeof( uint64_t ) ];
+	uint64_t boot_pw_on_check[ ( KCC_SMEM_BOOT_PW_ON_CHECK_SIZE + (sizeof( uint64_t )-1) ) / sizeof( uint64_t ) ];
+	uint64_t hw_id[ ( KCC_SMEM_HW_ID_SIZE + (sizeof( uint64_t )-1) ) / sizeof( uint64_t ) ];
+	uint64_t vendor_id[ ( KCC_SMEM_VENDOR_ID_SIZE + (sizeof( uint64_t )-1) ) / sizeof( uint64_t ) ];
+	uint64_t imei[ ( KCC_SMEM_IMEI_SIZE + (sizeof( uint64_t )-1) ) / sizeof( uint64_t ) ];
+	uint64_t nfc_rfs_sig_state[ ( KCC_SMEM_NFC_RFS_SIG_STATE_SIZE + (sizeof( uint64_t )-1) ) / sizeof( uint64_t ) ];
+	uint64_t uicc_info[ ( KCC_SMEM_UICC_INFO_SIZE + (sizeof( uint64_t )-1) ) / sizeof( uint64_t ) ];
+	uint64_t sddl_flag[ ( KCC_SMEM_SDDL_FLAG_SIZE + (sizeof( uint64_t )-1) ) / sizeof( uint64_t ) ];
+	uint64_t fbdl_enable[ ( KCC_SMEM_FBDL_ENABLE_SIZE + (sizeof( uint64_t )-1) ) / sizeof( uint64_t ) ];
+	uint64_t covert_mode_status[ ( KCC_SMEM_COVERT_MODE_STATUS_SIZE + (sizeof( uint64_t )-1) ) / sizeof( uint64_t ) ];
+	uint64_t xbl_loader_bootlog[ ( KCC_SMEM_XBL_LOADER_BOOTLOG_SIZE + (sizeof( uint64_t )-1) ) / sizeof( uint64_t ) ];
+} type_kcc_smem;
+
+static type_kcc_smem    *kc_smem_addr = NULL;
+
+static void kc_smem_init( void )
+{
+	size_t smem_size;
+
+	kc_smem_addr = qcom_smem_get(QCOM_SMEM_HOST_ANY, SMEM_ID_VENDOR2, &smem_size);
+	if (IS_ERR(kc_smem_addr)) {
+		printk(KERN_ERR "%s: Unable to acquire shared state entry\n", __func__);
+	}
+
+	return;
+}
+
+void *kc_smem_alloc(unsigned smem_type, unsigned buf_size)
+{
+	if (kc_smem_addr == NULL)
+	{
+		kc_smem_init();
+
+		if (kc_smem_addr == NULL)
+		{
+			return( NULL );
+		}
+	}
+
+	switch (smem_type)
+	{
+		case SMEM_CHG_PARAM:
+			if( buf_size <= KCC_SMEM_CHG_PARAM_SIZE )
+			{
+				return( ( void * )&kc_smem_addr->chg_param[ 0 ] );
+			}
+			break;
+
+		case SMEM_KERR_LOG:
+			if( buf_size <= KCC_SMEM_KERR_LOG_SIZE )
+			{
+				return( ( void * )&kc_smem_addr->kerr_log[ 0 ] );
+			}
+			break;
+
+		case SMEM_CRASH_LOG:
+			if( buf_size <= KCC_SMEM_CRASH_LOG_SIZE )
+			{
+				return( ( void * )&kc_smem_addr->crash_log[ 0 ] );
+			}
+			break;
+
+		case SMEM_FACTORY_CMDLINE:
+			if( buf_size <= KCC_SMEM_FACTORY_CMDLINE_SIZE )
+			{
+				return( ( void * )&kc_smem_addr->factory_cmdline[ 0 ] );
+			}
+			break;
+
+		case SMEM_FACTORY_OPTIONS:
+			if( buf_size <= KCC_SMEM_FACTORY_OPTIONS_SIZE )
+			{
+				return( ( void * )&kc_smem_addr->factory_options[ 0 ] );
+			}
+			break;
+
+		case SMEM_DDR_DATA_INFO:
+			if( buf_size <= KCC_SMEM_DDR_DATA_INFO_SIZE )
+			{
+				return( ( void * )&kc_smem_addr->ddr_data_info[ 0 ] );
+			}
+			break;
+
+		case SMEM_KC_WM_UUID:
+			if( buf_size <= KCC_SMEM_KC_WM_UUID_SIZE )
+			{
+				return( ( void * )&kc_smem_addr->kc_wm_uuid[ 0 ] );
+			}
+			break;
+
+		case SMEM_SECUREBOOT_FLAG:
+			if( buf_size <= KCC_SMEM_SECUREBOOT_FLAG_SIZE )
+			{
+				return( ( void * )&kc_smem_addr->secureboot_flag[ 0 ] );
+			}
+			break;
+
+		case SMEM_BFSS_DATA:
+			if( buf_size <= KCC_SMEM_BFSS_DATA_SIZE )
+			{
+				return( ( void * )&kc_smem_addr->bfss_data[ 0 ] );
+			}
+			break;
+
+		case SMEM_KC_POWER_ON_STATUS_INFO:
+			if( buf_size <= KCC_SMEM_KC_POWER_ON_STATUS_INFO_SIZE )
+			{
+				return( ( void * )&kc_smem_addr->kc_power_on_status_info[ 0 ] );
+			}
+			break;
+
+		case SMEM_BOOT_PW_ON_CHECK:
+			if( buf_size <= KCC_SMEM_BOOT_PW_ON_CHECK_SIZE )
+			{
+				return( ( void * )&kc_smem_addr->boot_pw_on_check[ 0 ] );
+			}
+			break;
+
+		case SMEM_HW_ID:
+			if( buf_size <= KCC_SMEM_HW_ID_SIZE )
+			{
+				return( ( void * )&kc_smem_addr->hw_id[ 0 ] );
+			}
+			break;
+
+		case SMEM_VENDOR_ID:
+			if( buf_size <= KCC_SMEM_VENDOR_ID_SIZE )
+			{
+				return( ( void * )&kc_smem_addr->vendor_id[ 0 ] );
+			}
+			break;
+
+		case SMEM_IMEI:
+			if( buf_size <= KCC_SMEM_IMEI_SIZE )
+			{
+				return( ( void * )&kc_smem_addr->imei[ 0 ] );
+			}
+			break;
+
+		case SMEM_NFC_RFS_SIG_STATE:
+			if( buf_size <= KCC_SMEM_NFC_RFS_SIG_STATE_SIZE )
+			{
+				return( ( void * )&kc_smem_addr->nfc_rfs_sig_state[ 0 ] );
+			}
+			break;
+
+		case SMEM_UICC_INFO:
+			if( buf_size <= KCC_SMEM_UICC_INFO_SIZE )
+			{
+				return( ( void * )&kc_smem_addr->uicc_info[ 0 ] );
+			}
+			break;
+
+		case SMEM_SDDL_FLAG:
+			if( buf_size <= KCC_SMEM_SDDL_FLAG_SIZE )
+			{
+				return( ( void * )&kc_smem_addr->sddl_flag[ 0 ] );
+			}
+			break;
+
+		case SMEM_FBDL_ENABLE:
+			if( buf_size <= KCC_SMEM_FBDL_ENABLE_SIZE )
+			{
+				return( ( void * )&kc_smem_addr->fbdl_enable[ 0 ] );
+			}
+			break;
+
+		case SMEM_COVERT_MODE_STATUS:
+			if( buf_size <= KCC_SMEM_COVERT_MODE_STATUS_SIZE )
+			{
+				return( ( void * )&kc_smem_addr->covert_mode_status[ 0 ] );
+			}
+			break;
+
+		case SMEM_XBL_LOADER_BOOTLOG:
+			if( buf_size <= KCC_SMEM_XBL_LOADER_BOOTLOG_SIZE )
+			{
+				return( ( void * )&kc_smem_addr->xbl_loader_bootlog[ 0 ] );
+			}
+			break;
+
+		default:
+			break;
+	}
+
+	return( NULL );
+}
 
 MODULE_AUTHOR("Bjorn Andersson <bjorn.andersson@sonymobile.com>");
 MODULE_DESCRIPTION("Qualcomm Shared Memory Manager");

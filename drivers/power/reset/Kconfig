@@ -1,3 +1,8 @@
+#
+# This software is contributed or developed by KYOCERA Corporation.
+# (C) 2019 KYOCERA Corporation
+#
+
 menuconfig POWER_RESET
 	bool "Board level reset or power off"
 	help
@@ -254,6 +259,13 @@ config POWER_RESET_SC27XX
 	  Spreadtrum SC27xx series PMICs. The SC27xx series
 	  PMICs includes the SC2720, SC2721, SC2723, SC2730
 	  and SC2731 chips.
+
+config EX_RAMDUMP
+	bool "EX ramdump"
+	default n
+	help
+	Say Y here if you want to support the EX ramdump.
+	When in doubt, say "N".
 
 endif
 

@@ -1,4 +1,8 @@
 /*
+ * This software is contributed or developed by KYOCERA Corporation.
+ * (C) 2020 KYOCERA Corporation
+ */
+/*
  *  Sysfs interface for the universal power supply monitor class
  *
  *  Copyright © 2007  David Woodhouse <dwmw2@infradead.org>
@@ -46,7 +50,13 @@ static const char * const power_supply_type_text[] = {
 	"USB_PD", "USB_PD_DRP", "BrickID",
 	"USB_HVDCP", "USB_HVDCP_3", "USB_HVDCP_3P5", "Wireless", "USB_FLOAT",
 	"BMS", "Parallel", "Main", "USB_C_UFP", "USB_C_DFP",
-	"Charge_Pump",
+	"Charge_Pump", "DC",
+#ifdef CONFIG_OEM_HKADC
+	"hkadc",
+#endif
+#ifdef CONFIG_OEM_WIRELESS_CHARGER
+	"WPC",
+#endif
 };
 
 static const char * const power_supply_usb_type_text[] = {
@@ -345,6 +355,48 @@ static struct device_attribute power_supply_attrs[] = {
 	POWER_SUPPLY_ATTR(precharge_current),
 	POWER_SUPPLY_ATTR(charge_term_current),
 	POWER_SUPPLY_ATTR(calibrate),
+	/* OEM added of type `int' */
+	POWER_SUPPLY_ATTR(oem_input_suspend),
+	POWER_SUPPLY_ATTR(oem_battfet_suspend),
+	POWER_SUPPLY_ATTR(oem_recharge_vol),
+	POWER_SUPPLY_ATTR(bms_batt_status),
+	POWER_SUPPLY_ATTR(bms_fact_setting),
+	POWER_SUPPLY_ATTR(oem_batt_chg_enabled),
+	POWER_SUPPLY_ATTR(battery_care_mode),
+	POWER_SUPPLY_ATTR(battery_care_notification),
+	POWER_SUPPLY_ATTR(oem_cycle_count),
+	POWER_SUPPLY_ATTR(oem_cycle_increase),
+	POWER_SUPPLY_ATTR(oem_online_time),
+	POWER_SUPPLY_ATTR(oem_auto_on_enable),
+	POWER_SUPPLY_ATTR(oem_auto_on_detect),
+	POWER_SUPPLY_ATTR(oem_chgpad_detect),
+	POWER_SUPPLY_ATTR(charger_status),
+	POWER_SUPPLY_ATTR(oem_lowbatt_boot),
+	POWER_SUPPLY_ATTR(oem_charging_log),
+#ifdef CONFIG_OEM_HKADC
+	POWER_SUPPLY_ATTR(camera_therm),
+	POWER_SUPPLY_ATTR(out_camera_therm),
+	POWER_SUPPLY_ATTR(in_camera_therm),
+	POWER_SUPPLY_ATTR(pa_therm),
+	POWER_SUPPLY_ATTR(lcd_therm),
+	POWER_SUPPLY_ATTR(usb_therm),
+	POWER_SUPPLY_ATTR(xo_therm),
+	POWER_SUPPLY_ATTR(module_5g_therm_1),
+	POWER_SUPPLY_ATTR(module_5g_therm_2),
+	POWER_SUPPLY_ATTR(module_5g_therm_3),
+	POWER_SUPPLY_ATTR(skin_therm),
+	POWER_SUPPLY_ATTR(charger_skin_therm),
+	POWER_SUPPLY_ATTR(usb_temp_level),
+#endif
+#ifdef CONFIG_OEM_WIRELESS_CHARGER
+	POWER_SUPPLY_ATTR(wchg_ic_enabled),
+	POWER_SUPPLY_ATTR(wchg_icl_max),
+	POWER_SUPPLY_ATTR(wchg_inhibit_en),
+	POWER_SUPPLY_ATTR(wchg_dummy),
+	POWER_SUPPLY_ATTR(wchg_type),
+	POWER_SUPPLY_ATTR(iterm_limit_enable),
+	POWER_SUPPLY_ATTR(wchg_en_capacity),
+#endif
 	/* Local extensions */
 	POWER_SUPPLY_ATTR(usb_hc),
 	POWER_SUPPLY_ATTR(usb_otg),

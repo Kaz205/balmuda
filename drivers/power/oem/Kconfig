@@ -1,0 +1,11 @@
+# This software is contributed or developed by KYOCERA Corporation.
+# (C) 2020 KYOCERA Corporation
+#
+
+config OEM_HKADC
+	tristate "OEM HKADC support"
+	default y
+
+config OEM_WIRELESS_CHARGER
+    tristate "OEM Wireless Charger support"
+	default y

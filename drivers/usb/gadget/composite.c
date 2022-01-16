@@ -5,6 +5,12 @@
  * Copyright (C) 2006-2008 David Brownell
  */
 
+/*
+ * This software is contributed or developed by KYOCERA Corporation.
+ * (C) 2018 KYOCERA Corporation
+ * (C) 2020 KYOCERA Corporation
+ */
+
 /* #define VERBOSE_DEBUG */
 
 #include <linux/kallsyms.h>
@@ -923,6 +929,16 @@ static int set_config(struct usb_composite_dev *cdev,
 	unsigned		power = gadget_is_otg(gadget) ? 8 : 100;
 	int			tmp;
 
+	/*
+	 * ignore 2nd time SET_CONFIGURATION
+	 * only for same config value twice.
+	 */
+	if (cdev->config && (cdev->config->bConfigurationValue == number)) {
+		DBG(cdev, "already in the same config with value %d\n",
+						number);
+		return 0;
+	}
+
 	if (number) {
 		list_for_each_entry(c, &cdev->configs, list) {
 			if (c->bConfigurationValue == number) {
@@ -1758,6 +1774,13 @@ composite_setup(struct usb_gadget *gadget, const struct usb_ctrlrequest *ctrl)
 	req->complete = composite_setup_complete;
 	req->length = 0;
 	gadget->ep0->driver_data = cdev;
+
+#ifdef CONFIG_KC_USB_SS
+	if ((cdev->desc.idVendor == 0x0482) && (ctrl->bRequest == 0x01) && (ctrl->bRequestType == 0xC0) && ((cdev->desc.idProduct == 0x0A8E) || (cdev->desc.idProduct == 0x0A8F))) {
+		pr_err("%s(): Request is invalid value, discard this request.\n", __func__);
+		return -1;
+	}
+#endif
 
 	/*
 	 * Don't let non-standard requests match any of the cases below

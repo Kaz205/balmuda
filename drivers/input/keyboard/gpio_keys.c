@@ -8,6 +8,17 @@
  * it under the terms of the GNU General Public License version 2 as
  * published by the Free Software Foundation.
  */
+/*
+ * This software is contributed or developed by KYOCERA Corporation.
+ * (C) 2012 KYOCERA Corporation
+ * (C) 2013 KYOCERA Corporation
+ * (C) 2014 KYOCERA Corporation
+ * (C) 2015 KYOCERA Corporation
+ * (C) 2016 KYOCERA Corporation
+ * (C) 2017 KYOCERA Corporation
+ * (C) 2018 KYOCERA Corporation
+ * (C) 2019 KYOCERA Corporation
+ */
 
 #include <linux/module.h>
 
@@ -32,6 +43,15 @@
 #include <linux/spinlock.h>
 #include <dt-bindings/input/gpio-keys.h>
 
+#include <linux/key_dm_driver.h>
+
+#ifdef DEBUG_KEYLOG_ENABLE
+#define KEY_LOG_PRINT(fmt, ...) printk(KERN_ERR fmt, ##__VA_ARGS__)
+#else
+#define KEY_LOG_PRINT(fmt, ...) pr_debug(fmt, ##__VA_ARGS__)
+#endif
+#define KEY_LOG_PRINT_SEND(fmt, ...) printk(KERN_NOTICE fmt, ##__VA_ARGS__)
+
 struct gpio_button_data {
 	const struct gpio_keys_button *button;
 	struct input_dev *input;
@@ -51,6 +71,10 @@ struct gpio_button_data {
 	bool disabled;
 	bool key_pressed;
 	bool suspended;
+
+	unsigned int on_cnt;
+	unsigned int off_cnt;
+	struct hrtimer m_hrtimer;
 };
 
 struct gpio_keys_drvdata {
@@ -60,6 +84,19 @@ struct gpio_keys_drvdata {
 	unsigned short *keymap;
 	struct gpio_button_data data[0];
 };
+
+struct gpio_keys_chattering_state {
+	unsigned int code;	/* input event code (KEY_*, SW_*) */
+	bool is_on;			/* weather key is on. */
+};
+
+#define MAX_CHATTERING_KEYS 32
+static int num_chattering_keys = 0;
+static struct gpio_keys_chattering_state gpio_keys_chattering_data[MAX_CHATTERING_KEYS];
+
+#define KDM_INIT_KEYCODE 0xFFFFFFFF
+static int g_kdm_check = 0;
+static int g_kdm_keycode = KDM_INIT_KEYCODE;
 
 /*
  * SYSFS interface for enabling/disabling keys and switches:
@@ -147,7 +184,7 @@ static void gpio_keys_disable_button(struct gpio_button_data *bdata)
 		disable_irq(bdata->irq);
 
 		if (bdata->gpiod)
-			cancel_delayed_work_sync(&bdata->work);
+			hrtimer_cancel(&bdata->m_hrtimer);
 		else
 			del_timer_sync(&bdata->release_timer);
 
@@ -359,38 +396,181 @@ static const struct attribute_group gpio_keys_attr_group = {
 	.attrs = gpio_keys_attrs,
 };
 
-static void gpio_keys_gpio_report_event(struct gpio_button_data *bdata)
+unsigned char key_cmd(unsigned char cmd, int *val)
 {
+	unsigned char ret = 1;
+	KEY_LOG_PRINT("%s:  %d\n", __func__, cmd);
+	switch (cmd) {
+	case KEY_DM_CHECK_COMMAND:
+		KEY_LOG_PRINT("key_cmd check:%x val0:%x val1:%x \n", g_kdm_check, val[0], val[1]);
+		if (val[0]) {
+			g_kdm_check = 1;
+		} else {
+			g_kdm_check = 0;
+		}
+		ret = 0;
+		break;
+
+	case KEY_DM_KEY_GET_EVENT_COOMAND:
+		KEY_LOG_PRINT("key_cmd code:%x\n", g_kdm_keycode );
+		*val = g_kdm_keycode;
+		g_kdm_keycode = KDM_INIT_KEYCODE;
+		ret = 0;
+		break;
+
+	default:
+		printk(KERN_ERR "%s:  %d\n", __func__, cmd);
+		break;
+
+	}
+	return ret;
+
+}
+EXPORT_SYMBOL(key_cmd);
+
+void key_set_code(unsigned int code )
+{
+	KEY_LOG_PRINT("key_set_code code:%d \n", code);
+	g_kdm_keycode = code;
+}
+EXPORT_SYMBOL(key_set_code);
+
+static unsigned int gpio_keys_get_chattering_pos(unsigned int code)
+{
+	unsigned int i;
+	unsigned int size;
+
+	size = num_chattering_keys;
+
+	KEY_LOG_PRINT("key off chattering table size=%d \n",size);
+
+	for (i = 0 ; i < size; i++) {
+		if (gpio_keys_chattering_data[i].code == code) {
+			KEY_LOG_PRINT("find keycode=0x%x,table pos=%d\n", code, i);
+			return i;
+		}
+	}
+	KEY_LOG_PRINT("Can't find keycode=0x%x\n", code);
+	return KDM_INIT_KEYCODE;
+}
+
+static void gpio_keys_set_stateon(unsigned int code)
+{
+	unsigned int pos;
+	pos = gpio_keys_get_chattering_pos(code);
+
+	if (pos != KDM_INIT_KEYCODE) {
+		KEY_LOG_PRINT("gpio key 0x%x on\n", code);
+		gpio_keys_chattering_data[pos].is_on = true;
+	} else {
+		KEY_LOG_PRINT("gpio keyon pos invalid\n");
+	}
+}
+
+static void gpio_keys_set_stateoff(unsigned int code)
+{
+	unsigned int pos;
+	pos = gpio_keys_get_chattering_pos(code);
+
+	if (pos != KDM_INIT_KEYCODE) {
+		KEY_LOG_PRINT("gpio key 0x%x off\n", code);
+		gpio_keys_chattering_data[pos].is_on = false;
+	} else {
+		KEY_LOG_PRINT("gpio keyoff pos invalid\n");
+	}
+}
+
+bool gpio_keys_is_stateon(unsigned int code)
+{
+	unsigned int pos;
+	pos = gpio_keys_get_chattering_pos(code);
+
+	if (pos != KDM_INIT_KEYCODE) {
+		KEY_LOG_PRINT("gpio key0x%x state ", code);
+		if (gpio_keys_chattering_data[pos].is_on == true) {
+			KEY_LOG_PRINT("on\n");
+			return true;
+		} else {
+			KEY_LOG_PRINT("off\n");
+			return false;
+		}
+	}
+
+	KEY_LOG_PRINT("gpio keystate pos invalid\n");
+	return false;
+}
+
+struct wakeup_source* gpio_wake_src;
+struct wakeup_source* chattering_wake_src;
+
+enum hrtimer_restart gpio_keys_hrtimer_func(struct hrtimer *timer)
+{
+	struct gpio_button_data *bdata = (struct gpio_button_data *)container_of(timer, struct gpio_button_data, m_hrtimer);
 	const struct gpio_keys_button *button = bdata->button;
 	struct input_dev *input = bdata->input;
 	unsigned int type = button->type ?: EV_KEY;
 	int state;
+	bool is_on;
 
-	state = gpiod_get_value_cansleep(bdata->gpiod);
+	state = gpiod_get_value(bdata->gpiod);
 	if (state < 0) {
 		dev_err(input->dev.parent,
 			"failed to get gpio state: %d\n", state);
-		return;
+		hrtimer_forward(timer, hrtimer_get_expires(timer), ms_to_ktime(bdata->software_debounce));
+		return HRTIMER_RESTART;
 	}
 
-	if (type == EV_ABS) {
-		if (state)
-			input_event(input, type, button->code, button->value);
+	KEY_LOG_PRINT("gpio_keys type:%x code:%x state:%x \n", type, *bdata->code, state);
+	if (state) {
+		KEY_LOG_PRINT("gpio_keys on_cnt:%d off_cnt:%d \n", bdata->on_cnt, bdata->off_cnt);
+		bdata->off_cnt = button->off_chattering_num;
+		if (bdata->on_cnt) {
+			KEY_LOG_PRINT("gpio_keys on_cnt-- \n");
+			bdata->on_cnt--;
+			hrtimer_forward(timer, hrtimer_get_expires(timer), ms_to_ktime(bdata->software_debounce));
+			return HRTIMER_RESTART;
+		}
+		else {
+			KEY_LOG_PRINT("gpio_keys set on \n");
+			bdata->on_cnt = button->on_chattering_num;
+			is_on = gpio_keys_is_stateon(*bdata->code);
+			gpio_keys_set_stateon(*bdata->code);
+			if (g_kdm_check) {
+				key_set_code(*bdata->code);
+			}
+			else if (!is_on) {
+				KEY_LOG_PRINT_SEND("code:%x send on event \n", *bdata->code);
+				__pm_wakeup_event(gpio_wake_src, MSEC_PER_SEC);
+				input_event(input, type, *bdata->code, state);
+				input_sync(input);
+			}
+		}
 	} else {
-		input_event(input, type, *bdata->code, state);
+		KEY_LOG_PRINT("gpio_keys on_cnt:%d off_cnt:%d \n", bdata->on_cnt, bdata->off_cnt);
+		bdata->on_cnt = button->on_chattering_num;
+		if (bdata->off_cnt){
+			KEY_LOG_PRINT("gpio_keys off_cnt-- \n");
+			bdata->off_cnt--;
+			hrtimer_forward(timer, hrtimer_get_expires(timer), ms_to_ktime(bdata->software_debounce));
+			return HRTIMER_RESTART;
+		}
+		else{
+			KEY_LOG_PRINT("gpio_keys set off \n");
+			bdata->off_cnt = button->off_chattering_num;
+			is_on = gpio_keys_is_stateon(*bdata->code);
+			gpio_keys_set_stateoff(*bdata->code);
+			if (g_kdm_check) {
+				KEY_LOG_PRINT("release not key_set_code \n");
+			}
+			else if (is_on) {
+				KEY_LOG_PRINT_SEND("code:%x send off event \n", *bdata->code);
+				__pm_wakeup_event(gpio_wake_src, MSEC_PER_SEC);
+				input_event(input, type, *bdata->code, state);
+				input_sync(input);
+			}
+		}
 	}
-	input_sync(input);
-}
-
-static void gpio_keys_gpio_work_func(struct work_struct *work)
-{
-	struct gpio_button_data *bdata =
-		container_of(work, struct gpio_button_data, work.work);
-
-	gpio_keys_gpio_report_event(bdata);
-
-	if (bdata->button->wakeup)
-		pm_relax(bdata->input->dev.parent);
+	return HRTIMER_NORESTART;
 }
 
 static irqreturn_t gpio_keys_gpio_isr(int irq, void *dev_id)
@@ -399,24 +579,11 @@ static irqreturn_t gpio_keys_gpio_isr(int irq, void *dev_id)
 
 	BUG_ON(irq != bdata->irq);
 
-	if (bdata->button->wakeup) {
-		const struct gpio_keys_button *button = bdata->button;
+	KEY_LOG_PRINT("%s : start by irq %d\n", __func__, irq);
 
-		pm_stay_awake(bdata->input->dev.parent);
-		if (bdata->suspended  &&
-		    (button->type == 0 || button->type == EV_KEY)) {
-			/*
-			 * Simulate wakeup key press in case the key has
-			 * already released by the time we got interrupt
-			 * handler to run.
-			 */
-			input_report_key(bdata->input, button->code, 1);
-		}
-	}
+	__pm_wakeup_event(chattering_wake_src, MSEC_PER_SEC);
 
-	mod_delayed_work(system_wq,
-			 &bdata->work,
-			 msecs_to_jiffies(bdata->software_debounce));
+	hrtimer_start(&bdata->m_hrtimer, ktime_set(0, bdata->software_debounce * NSEC_PER_MSEC), HRTIMER_MODE_REL);
 
 	return IRQ_HANDLED;
 }
@@ -475,7 +642,7 @@ static void gpio_keys_quiesce_key(void *data)
 	struct gpio_button_data *bdata = data;
 
 	if (bdata->gpiod)
-		cancel_delayed_work_sync(&bdata->work);
+		hrtimer_cancel(&bdata->m_hrtimer);
 	else
 		del_timer_sync(&bdata->release_timer);
 }
@@ -498,6 +665,8 @@ static int gpio_keys_setup_key(struct platform_device *pdev,
 	bdata->input = input;
 	bdata->button = button;
 	spin_lock_init(&bdata->lock);
+	bdata->on_cnt = button->on_chattering_num;
+	bdata->off_cnt = button->off_chattering_num;
 
 	if (child) {
 		bdata->gpiod = devm_fwnode_get_gpiod_from_child(dev, NULL,
@@ -545,12 +714,7 @@ static int gpio_keys_setup_key(struct platform_device *pdev,
 		bool active_low = gpiod_is_active_low(bdata->gpiod);
 
 		if (button->debounce_interval) {
-			error = gpiod_set_debounce(bdata->gpiod,
-					button->debounce_interval * 1000);
-			/* use timer if gpiolib doesn't provide debounce */
-			if (error < 0)
-				bdata->software_debounce =
-						button->debounce_interval;
+			bdata->software_debounce = button->debounce_interval;
 		}
 
 		if (button->irq) {
@@ -567,7 +731,8 @@ static int gpio_keys_setup_key(struct platform_device *pdev,
 			bdata->irq = irq;
 		}
 
-		INIT_DELAYED_WORK(&bdata->work, gpio_keys_gpio_work_func);
+		hrtimer_init(&bdata->m_hrtimer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
+		bdata->m_hrtimer.function = gpio_keys_hrtimer_func;
 
 		isr = gpio_keys_gpio_isr;
 		irqflags = IRQF_TRIGGER_RISING | IRQF_TRIGGER_FALLING;
@@ -655,8 +820,11 @@ static void gpio_keys_report_state(struct gpio_keys_drvdata *ddata)
 
 	for (i = 0; i < ddata->pdata->nbuttons; i++) {
 		struct gpio_button_data *bdata = &ddata->data[i];
-		if (bdata->gpiod)
-			gpio_keys_gpio_report_event(bdata);
+		if (bdata->gpiod) {
+			if(!hrtimer_is_queued(&bdata->m_hrtimer)) {
+				hrtimer_start(&bdata->m_hrtimer, ktime_set(0, bdata->software_debounce * NSEC_PER_MSEC), HRTIMER_MODE_REL);
+			}
+		}
 	}
 	input_sync(input);
 }
@@ -732,6 +900,10 @@ gpio_keys_get_devtree_pdata(struct device *dev)
 			dev_err(dev, "Button without keycode\n");
 			fwnode_handle_put(child);
 			return ERR_PTR(-EINVAL);
+		}else{
+			gpio_keys_chattering_data[num_chattering_keys].code = button->code;
+			gpio_keys_chattering_data[num_chattering_keys].is_on = false;
+			num_chattering_keys++;
 		}
 
 		fwnode_property_read_string(child, "label", &button->desc);
@@ -755,6 +927,20 @@ gpio_keys_get_devtree_pdata(struct device *dev)
 					 &button->debounce_interval))
 			button->debounce_interval = 5;
 
+		if (fwnode_property_read_u32(child, "on_chattering_num",
+					&button->on_chattering_num)){
+			button->on_chattering_num = 1;
+		}
+
+		KEY_LOG_PRINT("code:%d reg on_chattering_num:%d \n", button->code, button->on_chattering_num);
+
+		if (fwnode_property_read_u32(child, "off_chattering_num",
+					&button->off_chattering_num)){
+			button->off_chattering_num = 0;
+		}
+
+		KEY_LOG_PRINT("code:%d reg off_chattering_num:%d \n", button->code, button->off_chattering_num);
+
 		button++;
 	}
 
@@ -777,6 +963,9 @@ static int gpio_keys_probe(struct platform_device *pdev)
 	size_t size;
 	int i, error;
 	int wakeup = 0;
+
+	gpio_wake_src =  wakeup_source_register( dev, "gpio_keys_wake_src" );
+	chattering_wake_src =  wakeup_source_register( dev, "chattering_keys_wake_src" );
 
 	if (!pdata) {
 		pdata = gpio_keys_get_devtree_pdata(dev);

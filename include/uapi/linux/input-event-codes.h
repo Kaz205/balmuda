@@ -274,6 +274,10 @@
 #define KEY_F23			193
 #define KEY_F24			194
 
+#define KEY_GASSISTANT	198
+
+#define KEY_CUSTOM		199
+
 #define KEY_PLAYCD		200
 #define KEY_PAUSECD		201
 #define KEY_PROG3		202
@@ -688,6 +692,11 @@
 #define BTN_TRIGGER_HAPPY38		0x2e5
 #define BTN_TRIGGER_HAPPY39		0x2e6
 #define BTN_TRIGGER_HAPPY40		0x2e7
+
+#define KEY_KC_SOS				0x2fb
+#define KEY_KC_TOP_END			0x2fc
+#define KEY_KC_TOP_SPK			0x2fd
+#define KEY_KC_PTT				0x2fe
 
 /* We avoid low common keys in module aliases so they don't get huge. */
 #define KEY_MIN_INTERESTING	KEY_MUTE

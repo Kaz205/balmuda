@@ -14,6 +14,10 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  */
+/*
+ * This software is contributed or developed by KYOCERA Corporation.
+ * (C) 2020 KYOCERA Corporation
+ */
 
 #include <linux/clk.h>
 #include <linux/delay.h>
@@ -192,6 +196,8 @@ enum {
 	MSS_MSM8996,
 	MSS_SDM845,
 };
+
+extern int is_secure_boot_err;
 
 static int q6v5_regulator_init(struct device *dev, struct reg_info *regs,
 			       const struct qcom_mss_reg_res *reg_res)
@@ -637,10 +643,13 @@ static int q6v5_mpss_init_image(struct q6v5 *qproc, const struct firmware *fw)
 	writel(RMB_CMD_META_DATA_READY, qproc->rmb_base + RMB_MBA_COMMAND_REG);
 
 	ret = q6v5_rmb_mba_wait(qproc, RMB_MBA_META_DATA_AUTH_SUCCESS, 1000);
-	if (ret == -ETIMEDOUT)
+	if (ret == -ETIMEDOUT) {
 		dev_err(qproc->dev, "MPSS header authentication timed out\n");
-	else if (ret < 0)
+		is_secure_boot_err = 1;
+	} else if (ret < 0) {
 		dev_err(qproc->dev, "MPSS header authentication failed: %d\n", ret);
+		is_secure_boot_err = 1;
+	}
 
 	/* Metadata authentication done, remove modem access */
 	xferop_ret = q6v5_xfer_mem_ownership(qproc, &mdata_perm,
@@ -773,10 +782,13 @@ static int q6v5_mpss_load(struct q6v5 *qproc)
 	writel(size, qproc->rmb_base + RMB_PMI_CODE_LENGTH_REG);
 
 	ret = q6v5_rmb_mba_wait(qproc, RMB_MBA_AUTH_COMPLETE, 10000);
-	if (ret == -ETIMEDOUT)
+	if (ret == -ETIMEDOUT) {
 		dev_err(qproc->dev, "MPSS authentication timed out\n");
-	else if (ret < 0)
+		is_secure_boot_err = 1;
+	} else if (ret < 0) {
 		dev_err(qproc->dev, "MPSS authentication failed: %d\n", ret);
+		is_secure_boot_err = 1;
+	}
 
 release_firmware:
 	release_firmware(fw);

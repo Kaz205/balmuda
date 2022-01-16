@@ -2,6 +2,12 @@
 /*
  * Copyright (c) 2012-2020, The Linux Foundation. All rights reserved.
  */
+/*
+ * This software is contributed or developed by KYOCERA Corporation.
+ * (C) 2018 KYOCERA Corporation
+ * (C) 2019 KYOCERA Corporation
+ * (C) 2020 KYOCERA Corporation
+ */
 
 #include <linux/debugfs.h>
 #include <linux/delay.h>
@@ -25,6 +31,9 @@
 #include <linux/regulator/driver.h>
 #include <linux/regulator/machine.h>
 #include <linux/regulator/of_regulator.h>
+#include <linux/soc/qcom/smem.h>
+
+#include <linux/key_dm_driver.h>
 
 #define PMIC_VER_8941				0x01
 #define PMIC_VERSION_REG			0x0105
@@ -150,6 +159,14 @@
 #define QPNP_PON_BUFFER_SIZE			9
 
 #define QPNP_POFF_REASON_UVLO			13
+
+#ifdef PWRKEY_DEBUG
+#define PWRKEY_DBG_PRINT(fmt, ...) printk(KERN_ERR fmt, ##__VA_ARGS__)
+#else 
+#define PWRKEY_DBG_PRINT(fmt, ...) printk(KERN_DEBUG fmt, ##__VA_ARGS__)
+#endif
+
+static bool g_kdm_pwrkey_check = false;
 
 enum qpnp_pon_version {
 	QPNP_PON_GEN1_V1,
@@ -907,6 +924,21 @@ static struct qpnp_pon_config *qpnp_get_cfg(struct qpnp_pon *pon, u32 pon_type)
 	return NULL;
 }
 
+/*======The debug function for development======*/
+#include <linux/rtc.h>
+static void key_debug_marker(char *annotation, u32 key_status)
+{
+	struct timespec ts;
+	struct rtc_time tm;
+
+	getnstimeofday(&ts);
+	rtc_time_to_tm(ts.tv_sec, &tm);
+	pr_notice("%s %d %d-%02d-%02d %02d:%02d:%02d.%09lu UTC\n",
+		annotation, key_status, tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
+		tm.tm_hour, tm.tm_min, tm.tm_sec, ts.tv_nsec);
+}
+/*==============================================*/
+
 static int qpnp_pon_input_dispatch(struct qpnp_pon *pon, u32 pon_type)
 {
 	struct qpnp_pon_config *cfg = NULL;
@@ -973,8 +1005,14 @@ static int qpnp_pon_input_dispatch(struct qpnp_pon *pon, u32 pon_type)
 		input_sync(pon->pon_input);
 	}
 
+	PWRKEY_DBG_PRINT("%s: %x\n", __func__, g_kdm_pwrkey_check);
+	if (g_kdm_pwrkey_check) {
+		key_set_code(cfg->key_code);
+	} else {
+	key_debug_marker("pwrkey input report", pon_rt_sts & pon_rt_bit);
 	input_report_key(pon->pon_input, cfg->key_code, key_status);
 	input_sync(pon->pon_input);
+	}
 
 	cfg->old_state = !!key_status;
 
@@ -1156,6 +1194,30 @@ static irqreturn_t qpnp_resin_bark_irq(int irq, void *_pon)
 
 	return IRQ_HANDLED;
 }
+
+unsigned char pwrkey_cmd(unsigned char cmd, int *val)
+{
+	uint8_t ret = 1;
+
+	PWRKEY_DBG_PRINT("%s: cmd:%d\n", __func__, cmd);
+	switch (cmd) {
+		case KEY_DM_CHECK_COMMAND:
+		PWRKEY_DBG_PRINT("%s: %x %x\n", __func__, g_kdm_pwrkey_check, val[0]);
+			if (val[0]) {
+				g_kdm_pwrkey_check = true;
+			} else {
+				g_kdm_pwrkey_check = false;
+			}
+			ret = 0;
+			break;
+
+		default:
+			printk(KERN_ERR "%s: %d\n", __func__, cmd);
+			break;
+	}
+	return ret;
+}
+EXPORT_SYMBOL(pwrkey_cmd);
 
 static int qpnp_config_pull(struct qpnp_pon *pon, struct qpnp_pon_config *cfg)
 {
@@ -2359,6 +2421,11 @@ static int qpnp_pon_probe(struct platform_device *pdev)
 		spin_unlock_irqrestore(&spon_list_slock, flags);
 		pon->is_spon = true;
 	}
+
+	/* boot_reason */
+	boot_reason = *(unsigned int *)
+			(kc_smem_alloc(SMEM_KC_POWER_ON_STATUS_INFO, 8));
+	printk(KERN_NOTICE "Boot Reason = 0x%08x\n", boot_reason);
 
 	/* Register the PON configurations */
 	rc = qpnp_pon_config_init(pon, pdev);

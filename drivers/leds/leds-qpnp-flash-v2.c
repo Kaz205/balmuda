@@ -2,6 +2,10 @@
 /*
  * Copyright (c) 2016-2020, The Linux Foundation. All rights reserved.
  */
+/*
+ * This software is contributed or developed by KYOCERA Corporation.
+ * (C) 2021 KYOCERA Corporation
+*/
 
 #define pr_fmt(fmt)	"flashv2: %s: " fmt, __func__
 
@@ -25,6 +29,9 @@
 #include <linux/qpnp/qpnp-revid.h>
 #include <linux/log2.h>
 #include "leds.h"
+#include "kc_leds_drv.h"
+
+#define KCLIGHT_FLASH
 
 #define	FLASH_LED_REG_LED_STATUS1(base)		(base + 0x08)
 
@@ -1562,6 +1569,9 @@ static int qpnp_flash_led_switch_set(struct flash_switch_data *snode, bool on)
 	struct qpnp_flash_led *led = dev_get_drvdata(&snode->pdev->dev);
 	int rc, i, addr_offset;
 	u8 val, mask;
+#ifdef KCLIGHT_FLASH
+	u8 ires_mask = 0;
+#endif
 
 	if (snode->enabled == on) {
 		pr_debug("Switch node is already %s!\n",
@@ -1587,11 +1597,23 @@ static int qpnp_flash_led_switch_set(struct flash_switch_data *snode, bool on)
 	val = 0;
 	for (i = 0; i < led->num_fnodes; i++)
 		if (led->fnode[i].led_on &&
-				snode->led_mask & BIT(led->fnode[i].id))
+				snode->led_mask & BIT(led->fnode[i].id)){
 			val |= led->fnode[i].ires_idx << (led->fnode[i].id * 2);
+#ifdef KCLIGHT_FLASH
+			ires_mask |= 0x03 << (led->fnode[i].id * 2);
+#endif
+	}
+
+#ifdef KCLIGHT_FLASH
+	pr_info("[KCLIGHT]%s ires_mask=%x\n", __func__, ires_mask);
 
 	rc = qpnp_flash_led_masked_write(led, FLASH_LED_REG_IRES(led->base),
+						ires_mask, val);
+#else
+	rc = qpnp_flash_led_masked_write(led, FLASH_LED_REG_IRES(led->base),
 						FLASH_LED_CURRENT_MASK, val);
+#endif
+
 	if (rc < 0)
 		return rc;
 
@@ -1796,6 +1818,11 @@ static void qpnp_flash_led_brightness_set(struct led_classdev *led_cdev,
 	struct flash_switch_data *snode = NULL;
 	struct qpnp_flash_led *led = NULL;
 	int rc;
+
+	if (kc_leds_get_force_off_enable()) {
+		pr_err("[KCLIGHT]%s force_off enable\n", __func__);
+		return;
+	}
 
 	/*
 	 * strncmp() must be used here since a prefix comparison is required
@@ -2090,6 +2117,7 @@ static int qpnp_flash_led_parse_each_led_dt(struct qpnp_flash_led *led,
 	fnode->pdev = led->pdev;
 	fnode->cdev.brightness_set = qpnp_flash_led_brightness_set;
 	fnode->cdev.brightness_get = qpnp_flash_led_brightness_get;
+	fnode->cdev.flags |= LED_KEEP_TRIGGER;
 
 	rc = of_property_read_string(node, "qcom,led-name", &fnode->cdev.name);
 	if (rc < 0) {

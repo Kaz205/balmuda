@@ -515,3 +515,13 @@ obj-$(CONFIG_SND_SOC_MAX9877)	+= snd-soc-max9877.o
 obj-$(CONFIG_SND_SOC_MAX98504)	+= snd-soc-max98504.o
 obj-$(CONFIG_SND_SOC_SIMPLE_AMPLIFIER)	+= snd-soc-simple-amplifier.o
 obj-$(CONFIG_SND_SOC_TPA6130A2)	+= snd-soc-tpa6130a2.o
+
+# GB1003A Start AUD_18_0003
+# add for NXP smart PA TFA9888
+obj-$(CONFIG_SND_SOC_TFA98XX) += tfa/
+# GB1003A End AUD_18_0003
+
+# EB1073A Start AUD_18_0072
+# add for TI smart PA TAS256X
+obj-$(CONFIG_SND_SOC_TAS256X) += tas256x/
+# EB1073A End AUD_18_0072

@@ -1,4 +1,10 @@
 // SPDX-License-Identifier: GPL-2.0
+/*
+ * This software is contributed or developed by KYOCERA Corporation.
+ * (C) 2018 KYOCERA Corporation
+ * (C) 2020 KYOCERA Corporation
+ * (C) 2021 KYOCERA Corporation
+ */
 #include <linux/configfs.h>
 #include <linux/module.h>
 #include <linux/slab.h>
@@ -9,6 +15,12 @@
 #include "configfs.h"
 #include "u_f.h"
 #include "u_os_desc.h"
+
+#include <linux/switch.h>
+#include <linux/delay.h>
+
+#include "f_mtp.h"
+#include "f_mass_storage.h"
 
 #ifdef CONFIG_USB_CONFIGFS_UEVENT
 #include <linux/platform_device.h>
@@ -29,6 +41,23 @@ static struct class *android_class;
 static struct device *android_device;
 static int index;
 static int gadget_index;
+
+static int android_connect_flag;
+static bool charger_connect_flag = 0;
+static int diag_flag = 0;
+static char factory_string[8];
+static unsigned int enabled = false;
+
+#define KC_VENDOR_NAME		"change_mode"
+
+#define kc_dbg(instance, format, arg...)			\
+	if (android_debug_log)					\
+		dev_info(instance , format , ## arg)
+
+/* Enable Proprietary charger detection */
+bool android_debug_log = false;
+module_param(android_debug_log, bool, S_IRUGO | S_IWUSR);
+MODULE_PARM_DESC(android_debug_log, "Enable KC Log Output");
 
 struct device *create_function_device(char *name)
 {
@@ -101,6 +130,9 @@ struct gadget_info {
 	struct work_struct work;
 	struct device *dev;
 #endif
+	struct switch_dev sdev;
+	char inquiry_string[29];
+	struct fsg_common *fsg_common;
 };
 
 static inline struct gadget_info *to_gadget_info(struct config_item *item)
@@ -130,6 +162,8 @@ struct gadget_strings {
 	char *product;
 	char *serialnumber;
 
+	char *kc_serialnumber;
+
 	struct config_group group;
 	struct list_head list;
 };
@@ -149,6 +183,8 @@ struct gadget_config_name {
 
 #define MAX_USB_STRING_LEN	126
 #define MAX_USB_STRING_WITH_NULL_LEN	(MAX_USB_STRING_LEN+1)
+
+static void purge_configs_funcs(struct gadget_info *gi);
 
 static int usb_string_copy(const char *s, char **s_copy)
 {
@@ -392,6 +428,8 @@ static void gadget_info_attr_release(struct config_item *item)
 {
 	struct gadget_info *gi = to_gadget_info(item);
 
+	switch_dev_unregister(&gi->sdev);
+
 	WARN_ON(!list_empty(&gi->cdev.configs));
 	WARN_ON(!list_empty(&gi->string_list));
 	WARN_ON(!list_empty(&gi->available_func));
@@ -624,6 +662,18 @@ static struct config_group *function_make(
 
 	mutex_lock(&gi->lock);
 	list_add_tail(&fi->cfs_list, &gi->available_func);
+
+	if (!strcmp("mtp", func_name)) {
+		struct mtp_instance *mtp_ins = container_of(fi, struct mtp_instance, func_inst);
+		mtp_ins->dev->sdev = &gi->sdev;
+	}
+
+	if (!strcmp("mass_storage", func_name)) {
+		struct fsg_opts *opts = container_of(fi, struct fsg_opts, func_inst);
+		set_vendor_sdev(opts->common, &gi->sdev);
+		gi->fsg_common = opts->common;
+	}
+
 	mutex_unlock(&gi->lock);
 	return &fi->group;
 }
@@ -756,7 +806,123 @@ static const struct config_item_type config_desc_type = {
 
 GS_STRINGS_RW(gadget_strings, manufacturer);
 GS_STRINGS_RW(gadget_strings, product);
-GS_STRINGS_RW(gadget_strings, serialnumber);
+//GS_STRINGS_RW(gadget_strings, serialnumber);
+static ssize_t gadget_strings_serialnumber_show(struct config_item *item, char *page)
+{
+	struct gadget_strings *gs = to_gadget_strings(item);
+	return sprintf(page, "%s\n", gs->kc_serialnumber ?: "");
+}
+
+static ssize_t gadget_strings_serialnumber_store(struct config_item *item, 
+						const char *page, size_t len) 
+{
+	int ret; 
+	struct gadget_strings *gs = to_gadget_strings(item); 
+
+	if (!gs->serialnumber || strcmp("BALMUDA", gs->serialnumber)) {
+		ret = usb_string_copy(page, &gs->serialnumber); 
+		if (ret)
+			return ret;
+		ret = usb_string_copy(page, &gs->kc_serialnumber); 
+		if (ret)
+			return ret;
+	}
+
+	if (android_connect_flag == 1) {
+		struct usb_configuration *c;
+		struct gadget_info *gi = to_gadget_info(item);
+
+		android_connect_flag = 0;
+
+		list_for_each_entry(c, &gi->cdev.configs, list) {
+			struct config_usb_cfg *cfg;
+			struct usb_function *f;
+			struct usb_function *tmp;
+			struct gadget_config_name *cn;
+			struct usb_string *s;
+			bool ms_mode_flg = true;
+			struct usb_composite_dev *cdev = &gi->cdev;
+
+			cfg = container_of(c, struct config_usb_cfg, c);
+			if (!list_empty(&cfg->string_list)) {
+				unsigned i = 0;
+				list_for_each_entry(cn, &cfg->string_list, list) {
+					cfg->gstrings[i] = &cn->stringtab_dev;
+					cn->stringtab_dev.strings = &cn->strings;
+					cn->strings.s = cn->configuration;
+					i++;
+				}
+				cfg->gstrings[i] = NULL;
+				s = usb_gstrings_attach(&gi->cdev, cfg->gstrings, 1);
+				if (IS_ERR(s)) {
+					ret = PTR_ERR(s);
+					purge_configs_funcs(gi);
+					composite_dev_cleanup(&gi->cdev);
+				}
+				c->iConfiguration = s[0].id;
+			}
+
+			if (charger_connect_flag) {
+				list_for_each_entry_safe(f, tmp, &cfg->func_list, list) {
+					if (strcmp("mass_storage", f->name)) {
+						ms_mode_flg = false;
+						break;
+					}
+				}
+			}
+
+			if (ms_mode_flg) {
+				struct gadget_strings *gs;
+
+				list_for_each_entry(gs, &gi->string_list, list) {
+					usb_string_copy(gs->kc_serialnumber, &gs->serialnumber);
+				}
+			} else {
+				struct gadget_strings *gs;
+				list_for_each_entry(gs, &gi->string_list, list) {
+					usb_string_copy("BALMUDA", &gs->serialnumber);
+				}
+			}
+
+			list_for_each_entry_safe(f, tmp, &cfg->func_list, list) {
+				unsigned long flags;
+
+				list_del(&f->list);
+
+				if (!strcmp("diag", f->name)) {
+					spin_lock_irqsave(&cdev->lock, flags);
+					if (diag_flag == 0) {
+						diag_flag++;
+						spin_unlock_irqrestore(&cdev->lock, flags);
+					} else if (diag_flag == 1) {
+						diag_flag++;
+						spin_unlock_irqrestore(&cdev->lock, flags);
+						msleep(200);
+					} else {
+						spin_unlock_irqrestore(&cdev->lock, flags);
+						/* nothing_to_do */
+					}
+				}
+
+				ret = usb_add_function(c, f);
+				if (ret) {
+					list_add(&f->list, &cfg->func_list);
+					purge_configs_funcs(gi);
+					composite_dev_cleanup(&gi->cdev);
+				}
+			}
+		}
+	}
+	return len;
+}
+
+static struct configfs_attribute gadget_strings_attr_serialnumber = {
+	.ca_name	= __stringify(serialnumber),
+	.ca_mode	= S_IRUGO | S_IWUSR,
+	.ca_owner	= THIS_MODULE,
+	.show		= gadget_strings_serialnumber_show,
+	.store		= gadget_strings_serialnumber_store,
+};
 
 static struct configfs_attribute *gadget_strings_langid_attrs[] = {
 	&gadget_strings_attr_manufacturer,
@@ -772,6 +938,8 @@ static void gadget_strings_attr_release(struct config_item *item)
 	kfree(gs->manufacturer);
 	kfree(gs->product);
 	kfree(gs->serialnumber);
+
+	kfree(gs->kc_serialnumber);
 
 	list_del(&gs->list);
 	kfree(gs);
@@ -1297,6 +1465,9 @@ static int configfs_composite_bind(struct usb_gadget *gadget,
 	unsigned			i;
 	int				ret;
 
+	bool				usb_add_function_flag = true;
+	bool				ms_mode_flg = true;
+
 	/* the gi->lock is hold by the caller */
 	gi->unbind = 0;
 	cdev->gadget = gadget;
@@ -1335,9 +1506,26 @@ static int configfs_composite_bind(struct usb_gadget *gadget,
 
 			gi->gstrings[i] = &gs->stringtab_dev;
 			gs->stringtab_dev.strings = gs->strings;
+
+			if (!gs->manufacturer || !strcmp("", gs->manufacturer)) {
+				usb_string_copy("BALMUDA", &gs->manufacturer);
+			}
+
 			gs->strings[USB_GADGET_MANUFACTURER_IDX].s =
 				gs->manufacturer;
+
+			if (!gs->product || !strcmp("", gs->product)) {
+				usb_string_copy("BALMUDA_Android", &gs->product);
+			}
+
 			gs->strings[USB_GADGET_PRODUCT_IDX].s = gs->product;
+
+			if (!gs->serialnumber || !strcmp("", gs->serialnumber)) {
+				usb_string_copy("0123456789ABCDEF", &gs->serialnumber);
+				usb_string_copy("0123456789ABCDEF", &gs->kc_serialnumber);
+				usb_add_function_flag = false;
+			}
+
 			gs->strings[USB_GADGET_SERIAL_IDX].s = gs->serialnumber;
 			i++;
 		}
@@ -1383,32 +1571,77 @@ static int configfs_composite_bind(struct usb_gadget *gadget,
 		if (gadget_is_otg(gadget))
 			c->descriptors = otg_desc;
 
-		cfg = container_of(c, struct config_usb_cfg, c);
-		if (!list_empty(&cfg->string_list)) {
-			i = 0;
-			list_for_each_entry(cn, &cfg->string_list, list) {
-				cfg->gstrings[i] = &cn->stringtab_dev;
-				cn->stringtab_dev.strings = &cn->strings;
-				cn->strings.s = cn->configuration;
-				i++;
+		if (usb_add_function_flag) {
+			cfg = container_of(c, struct config_usb_cfg, c);
+			if (!list_empty(&cfg->string_list)) {
+				i = 0;
+				list_for_each_entry(cn, &cfg->string_list, list) {
+					cfg->gstrings[i] = &cn->stringtab_dev;
+					cn->stringtab_dev.strings = &cn->strings;
+					cn->strings.s = cn->configuration;
+					i++;
+				}
+				cfg->gstrings[i] = NULL;
+				s = usb_gstrings_attach(&gi->cdev, cfg->gstrings, 1);
+				if (IS_ERR(s)) {
+					ret = PTR_ERR(s);
+					goto err_comp_cleanup;
+				}
+				c->iConfiguration = s[0].id;
 			}
-			cfg->gstrings[i] = NULL;
-			s = usb_gstrings_attach(&gi->cdev, cfg->gstrings, 1);
-			if (IS_ERR(s)) {
-				ret = PTR_ERR(s);
-				goto err_comp_cleanup;
+
+			if (charger_connect_flag) {
+				list_for_each_entry_safe(f, tmp, &cfg->func_list, list) {
+					if (strcmp("mass_storage", f->name)) {
+						ms_mode_flg = false;
+						break;
+					}
+				}
 			}
-			c->iConfiguration = s[0].id;
+
+			if (ms_mode_flg) {
+				struct gadget_strings *gs;
+
+				list_for_each_entry(gs, &gi->string_list, list) {
+					usb_string_copy(gs->kc_serialnumber, &gs->serialnumber);
+				}
+			} else {
+				struct gadget_strings *gs;
+				list_for_each_entry(gs, &gi->string_list, list) {
+					usb_string_copy("BALMUDA", &gs->serialnumber);
+				}
+			}
+
+			list_for_each_entry_safe(f, tmp, &cfg->func_list, list) {
+				unsigned long flags;
+
+				list_del(&f->list);
+
+				if (!strcmp("diag", f->name)) {
+					spin_lock_irqsave(&cdev->lock, flags);
+					if (diag_flag == 0) {
+						diag_flag++;
+						spin_unlock_irqrestore(&cdev->lock, flags);
+					} else if (diag_flag == 1) {
+						diag_flag++;
+						spin_unlock_irqrestore(&cdev->lock, flags);
+						msleep(200);
+					} else {
+						spin_unlock_irqrestore(&cdev->lock, flags);
+						/* nothing_to_do */
+					}
+				}
+
+				ret = usb_add_function(c, f);
+				if (ret) {
+					list_add(&f->list, &cfg->func_list);
+					goto err_purge_funcs;
+				}
+			}
+		} else {
+			android_connect_flag = 1;
 		}
 
-		list_for_each_entry_safe(f, tmp, &cfg->func_list, list) {
-			list_del(&f->list);
-			ret = usb_add_function(c, f);
-			if (ret) {
-				list_add(&f->list, &cfg->func_list);
-				goto err_purge_funcs;
-			}
-		}
 		usb_ep_autoconfig_reset(cdev->gadget);
 	}
 	if (cdev->use_os_string) {
@@ -1497,8 +1730,14 @@ static void configfs_composite_unbind(struct usb_gadget *gadget)
 
 	kfree(otg_desc[0]);
 	otg_desc[0] = NULL;
-	purge_configs_funcs(gi);
-	composite_dev_cleanup(cdev);
+
+	if (android_connect_flag == 0) {
+		purge_configs_funcs(gi);
+		composite_dev_cleanup(cdev);
+	} else {
+		android_connect_flag = 0;
+	}
+
 	usb_ep_autoconfig_reset(cdev->gadget);
 	spin_lock_irqsave(&gi->spinlock, flags);
 	cdev->gadget = NULL;
@@ -1740,8 +1979,172 @@ out:
 
 static DEVICE_ATTR(state, S_IRUGO, state_show, NULL);
 
+static ssize_t enable_show(struct device *pdev, struct device_attribute *attr,
+			char *buf)
+{
+	return snprintf(buf, PAGE_SIZE, "%d\n", enabled);
+}
+
+static ssize_t enable_store(struct device *pdev,
+			struct device_attribute *attr, const char *buff, size_t size)
+{
+	sscanf(buff, "%d", &enabled);
+	return size;
+}
+
+static DEVICE_ATTR(enable, S_IRUGO | S_IWUSR, enable_show, enable_store);
+
+static ssize_t factory_show(struct device *pdev, struct device_attribute *attr,
+			char *buf)
+{
+	return snprintf(buf, PAGE_SIZE, "%s\n", factory_string);
+}
+
+static ssize_t factory_store(struct device *pdev,
+			struct device_attribute *attr, const char *buff, size_t size)
+{
+	if (size > 8)
+		return -EINVAL;
+	if (strcmp(buff, "fact1") && strcmp(buff, "fact2") && strcmp(buff, "normal"))
+		return -EINVAL;
+
+	sscanf(buff, "%s", factory_string);
+
+	return size;
+}
+
+static DEVICE_ATTR(factory, S_IRUGO | S_IWUSR, factory_show, factory_store);
+
+static ssize_t charger_store(struct device *pdev,
+			struct device_attribute *attr,
+			const char *buff, size_t size)
+{
+	if (size == 0 || buff[0]=='0') {
+		charger_connect_flag = 0;
+	} else {
+		charger_connect_flag = 1;
+	}
+
+	return size;
+}
+
+static DEVICE_ATTR(kccharger, S_IWUSR, NULL, charger_store);
+
+static ssize_t mtp_store_vendor_req(struct device *dev,
+               struct device_attribute *attr, const char *buf, size_t size)
+{
+	if (mtp_set_vendor_req(buf) != 2)
+		return -EINVAL;
+
+	return size;
+}
+
+static DEVICE_ATTR(vendor_req, S_IWUSR | S_IWGRP, 0, mtp_store_vendor_req);
+
+static ssize_t mass_storage_inquiry_show(struct device *dev,
+				struct device_attribute *attr, char *buf)
+{
+	struct gadget_info *gi = dev_get_drvdata(dev);
+
+	return snprintf(buf, PAGE_SIZE, "%s\n", gi->inquiry_string);
+}
+
+static ssize_t mass_storage_inquiry_store(struct device *dev,
+		struct device_attribute *attr, const char *buf, size_t size)
+{
+	struct gadget_info *gi = dev_get_drvdata(dev);
+
+	if (size >= sizeof(gi->inquiry_string))
+		return -EINVAL;
+	return strlcpy(gi->inquiry_string, buf, (8 + 16 + 4 + 1));
+}
+
+static DEVICE_ATTR(inquiry_string, S_IRUGO | S_IWUSR,
+					mass_storage_inquiry_show,
+					mass_storage_inquiry_store);
+
+static ssize_t fsg_store_vendor_cmd(struct device *dev,
+		struct device_attribute *attr, const char *buf, size_t size)
+{
+	struct gadget_info *gi = dev_get_drvdata(dev);
+
+	if (gi->fsg_common == NULL)
+		return -EINVAL;
+	if((set_vendor_cmd_1(buf, gi->fsg_common)) != 2){
+		return -EINVAL;
+	}
+
+	return size;
+}						
+static DEVICE_ATTR(vendor_cmd, S_IWUSR | S_IWGRP, 0, fsg_store_vendor_cmd);
+
+static ssize_t fsg_store_vendor_cmd2(struct device *dev,
+		struct device_attribute *attr, const char *buf, size_t size)
+{
+	struct gadget_info *gi = dev_get_drvdata(dev);
+
+	if (gi->fsg_common == NULL)
+		return -EINVAL;
+	if((set_vendor_cmd_2(buf, gi->fsg_common)) != 2){
+		return -EINVAL;
+	}
+
+	return size;
+}
+static DEVICE_ATTR(vendor_cmd2, S_IWUSR | S_IWGRP, 0, fsg_store_vendor_cmd2);
+
+#ifdef CONFIG_KC_USB_CDROM
+static ssize_t fsg_store_vendor_cmd3(struct device *dev,
+		struct device_attribute *attr, const char *buf, size_t size)
+{
+	struct gadget_info *gi = dev_get_drvdata(dev);
+
+	if (gi->fsg_common == NULL)
+		return -EINVAL;
+	if((set_vendor_cmd_3(buf, gi->fsg_common)) != 2){
+		return -EINVAL;
+	}
+
+	return size;
+}
+static DEVICE_ATTR(vendor_cmd3, S_IWUSR | S_IWGRP, 0, fsg_store_vendor_cmd3);
+
+static ssize_t lun_chg_show(struct device *dev, struct device_attribute *attr,char *buf)
+{
+	struct gadget_info *gi = dev_get_drvdata(dev);
+
+	return get_lun_chg(buf, gi->fsg_common);
+}
+
+static ssize_t lun_chg_store(struct device *dev,
+		struct device_attribute *attr, const char *buf, size_t size)
+{
+	struct gadget_info *gi = dev_get_drvdata(dev);
+
+	if (gi->fsg_common == NULL)
+		return -EINVAL;
+	if((set_lun_chg(buf, gi->fsg_common)) != 0){
+		return -EINVAL;
+	}
+
+	return size;
+}
+static DEVICE_ATTR(lun_chg, S_IRUGO | S_IWUSR, lun_chg_show, lun_chg_store);
+#endif /* CONFIG_KC_USB_CDROM */
+
 static struct device_attribute *android_usb_attributes[] = {
 	&dev_attr_state,
+	&dev_attr_enable,
+	&dev_attr_factory,
+	&dev_attr_kccharger,
+	&dev_attr_vendor_req,
+	&dev_attr_inquiry_string,
+	&dev_attr_vendor_cmd,
+	&dev_attr_vendor_cmd2,
+#ifdef CONFIG_KC_USB_CDROM
+	&dev_attr_vendor_cmd3,
+	&dev_attr_lun_chg,
+#endif /* CONFIG_KC_USB_CDROM */
 	NULL
 };
 
@@ -1807,6 +2210,7 @@ static struct config_group *gadgets_make(
 		const char *name)
 {
 	struct gadget_info *gi;
+	int ret;
 
 	gi = kzalloc(sizeof(*gi), GFP_KERNEL);
 	if (!gi)
@@ -1844,7 +2248,7 @@ static struct config_group *gadgets_make(
 	composite_init_dev(&gi->cdev);
 	gi->cdev.desc.bLength = USB_DT_DEVICE_SIZE;
 	gi->cdev.desc.bDescriptorType = USB_DT_DEVICE;
-	gi->cdev.desc.bcdDevice = cpu_to_le16(get_default_bcdDevice());
+	gi->cdev.desc.bcdDevice = cpu_to_le16(0x0100);
 
 	gi->composite.gadget_driver = configfs_driver_template;
 
@@ -1854,6 +2258,11 @@ static struct config_group *gadgets_make(
 	if (!gi->composite.gadget_driver.function)
 		goto err;
 
+	gi->sdev.name = KC_VENDOR_NAME;
+	ret = switch_dev_register(&gi->sdev);
+	if (unlikely(ret)) {
+		goto err;
+	}
 	if (android_device_create(gi) < 0)
 		goto err;
 
@@ -1906,6 +2315,8 @@ EXPORT_SYMBOL_GPL(unregister_gadget_item);
 static int __init gadget_cfs_init(void)
 {
 	int ret;
+
+	android_connect_flag = 0;
 
 	config_group_init(&gadget_subsys.su_group);
 

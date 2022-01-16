@@ -280,6 +280,20 @@ static bool is_dc_available(struct qpnp_qg *chip)
 	return true;
 }
 
+#ifdef CONFIG_OEM_WIRELESS_CHARGER
+static bool is_wchg_available(struct qpnp_qg *chip)
+{
+	if (chip->wchg_psy)
+		return true;
+
+	chip->wchg_psy = power_supply_get_by_name("wireless");
+	if (!chip->wchg_psy)
+		return false;
+
+	return true;
+}
+#endif
+
 bool is_usb_present(struct qpnp_qg *chip)
 {
 	union power_supply_propval pval = {0, };
@@ -294,12 +308,22 @@ bool is_usb_present(struct qpnp_qg *chip)
 bool is_dc_present(struct qpnp_qg *chip)
 {
 	union power_supply_propval pval = {0, };
+	int dc_present = 0;
 
 	if (is_dc_available(chip))
 		power_supply_get_property(chip->dc_psy,
 			POWER_SUPPLY_PROP_PRESENT, &pval);
+	dc_present = pval.intval;
 
-	return pval.intval ? true : false;
+#ifdef CONFIG_OEM_WIRELESS_CHARGER
+	if (is_wchg_available(chip))
+		power_supply_get_property(chip->wchg_psy,
+			POWER_SUPPLY_PROP_PRESENT, &pval);
+
+	dc_present |= pval.intval;
+#endif
+
+	return dc_present ? true : false;
 }
 
 bool is_input_present(struct qpnp_qg *chip)

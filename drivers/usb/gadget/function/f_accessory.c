@@ -15,6 +15,11 @@
  *
  */
 
+/*
+ * This software is contributed or developed by KYOCERA Corporation.
+ * (C) 2018 KYOCERA Corporation
+ */
+
 /* #define DEBUG */
 /* #define VERBOSE_DEBUG */
 
@@ -849,6 +854,7 @@ int acc_ctrlrequest(struct usb_composite_dev *cdev,
 
 	if (b_requestType == (USB_DIR_OUT | USB_TYPE_VENDOR)) {
 		if (b_request == ACCESSORY_START) {
+			atomic_set(&_acc_dev->open_excl, 0);
 			dev->start_requested = 1;
 			schedule_delayed_work(
 				&dev->start_work, msecs_to_jiffies(10));

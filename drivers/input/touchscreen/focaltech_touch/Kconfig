@@ -1,9 +1,12 @@
+# SPDX-License-Identifier: GPL-2.0-only
 #
 # Focaltech Touchscreen driver configuration
 #
+if TOUCHSCREEN_FOCALTECH
 
 config TOUCHSCREEN_FTS
 	bool "Focaltech Touchscreen"
+	default y
 	help
 	  Say Y here if you have Focaltech touch panel.
 	  If unsure, say N.
@@ -12,3 +15,5 @@ config TOUCHSCREEN_FTS_DIRECTORY
 	string "Focaltech ts directory name"
 	default "focaltech_touch"
 	depends on TOUCHSCREEN_FTS
+
+endif

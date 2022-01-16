@@ -59,7 +59,7 @@ struct diagchar_priv {
 
 /* Memory pool variables */
 /* Used for copying any incoming packet from user space clients. */
-static unsigned int poolsize = 12;
+static unsigned int poolsize = 15;
 
 /*
  * Used for HDLC encoding packets coming from the user

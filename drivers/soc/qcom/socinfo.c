@@ -2,6 +2,10 @@
 /*
  * Copyright (c) 2009-2021, The Linux Foundation. All rights reserved.
  */
+/*
+ * This software is contributed or developed by KYOCERA Corporation.
+ * (C) 2021 KYOCERA Corporation
+ */
 
 #define pr_fmt(fmt) "%s: " fmt, __func__
 
@@ -41,7 +45,7 @@ enum {
 	HW_PLATFORM_FFA     = 2,
 	HW_PLATFORM_FLUID   = 3,
 	HW_PLATFORM_SVLTE_FFA	= 4,
-	HW_PLATFORM_SVLTE_SURF	= 5,
+	HW_PLATFORM_OEM	= 5,
 	HW_PLATFORM_MTP_MDM = 7,
 	HW_PLATFORM_MTP  = 8,
 	HW_PLATFORM_LIQUID  = 9,
@@ -64,7 +68,7 @@ const char *hw_platform[] = {
 	[HW_PLATFORM_FFA] = "FFA",
 	[HW_PLATFORM_FLUID] = "Fluid",
 	[HW_PLATFORM_SVLTE_FFA] = "SVLTE_FFA",
-	[HW_PLATFORM_SVLTE_SURF] = "SLVTE_SURF",
+	[HW_PLATFORM_OEM] = "MIZUKI",
 	[HW_PLATFORM_MTP_MDM] = "MDM_MTP_NO_DISPLAY",
 	[HW_PLATFORM_MTP] = "MTP",
 	[HW_PLATFORM_RCM] = "RCM",
@@ -100,6 +104,24 @@ const char *qrd_hw_platform_subtype[] = {
 	[PLATFORM_SUBTYPE_SKUAB] = "SKUAB",
 	[PLATFORM_SUBTYPE_SKUG] = "SKUG",
 	[PLATFORM_SUBTYPE_QRD_INVALID] = "INVALID",
+};
+
+enum {
+	PLATFORM_SUBTYPE_MIZUKI00 = 0x0,
+	PLATFORM_SUBTYPE_MIZUKI01 = 0x1,
+	PLATFORM_SUBTYPE_MIZUKI02 = 0x2,
+	PLATFORM_SUBTYPE_MIZUKI03 = 0x3,
+	PLATFORM_SUBTYPE_MIZUKI04 = 0x4,
+	PLATFORM_SUBTYPE_OEM_INVALID,
+};
+
+const char *oem_hw_platform_subtype[] = {
+	[PLATFORM_SUBTYPE_MIZUKI00] = "MIZUKI00",
+	[PLATFORM_SUBTYPE_MIZUKI01] = "MIZUKI01",
+	[PLATFORM_SUBTYPE_MIZUKI02] = "MIZUKI02",
+	[PLATFORM_SUBTYPE_MIZUKI03] = "MIZUKI03",
+	[PLATFORM_SUBTYPE_MIZUKI04] = "MIZUKI04",
+	[PLATFORM_SUBTYPE_OEM_INVALID] = "Invalid",
 };
 
 enum {
@@ -750,6 +772,13 @@ msm_get_platform_subtype(struct device *dev,
 		}
 		return snprintf(buf, PAGE_SIZE, "%-.32s\n",
 					qrd_hw_platform_subtype[hw_subtype]);
+	} else if (socinfo_get_platform_type() == HW_PLATFORM_OEM) {
+		if (hw_subtype >= PLATFORM_SUBTYPE_OEM_INVALID) {
+			pr_err("Invalid hardware platform sub type for oem found\n");
+			hw_subtype = PLATFORM_SUBTYPE_OEM_INVALID;
+		}
+		return snprintf(buf, PAGE_SIZE, "%-.32s\n",
+					oem_hw_platform_subtype[hw_subtype]);
 	} else {
 		if (hw_subtype >= PLATFORM_SUBTYPE_INVALID) {
 			pr_err("Invalid hardware platform subtype\n");

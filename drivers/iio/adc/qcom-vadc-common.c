@@ -1,3 +1,7 @@
+/*
+ * This software is contributed or developed by KYOCERA Corporation.
+ * (C) 2020 KYOCERA Corporation
+ */
 // SPDX-License-Identifier: GPL-2.0-only
 #include <linux/bug.h>
 #include <linux/kernel.h>
@@ -548,6 +552,43 @@ static const struct vadc_map_pt adcmap_batt_therm_400k_6125[] = {
 	{36,	940},
 	{34,	960},
 	{32,	980},
+};
+
+static const struct vadc_map_pt adcmap_oem_therm[] = {
+	{ 1833307,	-40000 },
+	{ 1816197,	-35000 },
+	{ 1793380,	-30000 },
+	{ 1763518,	-25000 },
+	{ 1725124,	-20000 },
+	{ 1676918,	-15000 },
+	{ 1617794,	-10000 },
+	{ 1546992,	-5000 },
+	{ 1464726,	0 },
+	{ 1371644,	5000 },
+	{ 1269595,	10000 },
+	{ 1161124,	15000 },
+	{ 1049301,	20000 },
+	{ 937500,	25000 },
+	{ 828809,	30000 },
+	{ 725871,	35000 },
+	{ 630613,	40000 },
+	{ 544302,	45000 },
+	{ 467285,	50000 },
+	{ 399678,	55000 },
+	{ 340935,	60000 },
+	{ 290348,	65000 },
+	{ 247171,	70000 },
+	{ 210337,	75000 },
+	{ 179176,	80000 },
+	{ 152804,	85000 },
+	{ 130507,	90000 },
+	{ 111730,	95000 },
+	{ 95791,	100000 },
+	{ 82358,	105000 },
+	{ 70974,	110000 },
+	{ 61310,	115000 },
+	{ 53133,	120000 },
+	{ 46124,	125000 },
 };
 
 struct lut_table {
@@ -1291,6 +1332,32 @@ static int qcom_adc_scale_hw_calib_cur(
 	return 0;
 }
 
+static int qcom_vadc_scale_oem_therm(
+				const struct vadc_prescale_ratio *prescale,
+				const struct adc_data *data,
+				u16 adc_code, int *result_mdec)
+{
+	s64 voltage = 0, result = 0;
+	int ret;
+
+	if (adc_code > VADC5_MAX_CODE)
+		adc_code = 0;
+
+	/* (ADC code * vref_vadc (1.875V)) / full_scale_code */
+	voltage = (s64) adc_code * ADC_HC_VDD_REF * 1000;
+	voltage = div64_s64(voltage, (data->full_scale_code_volt
+								* 1000));
+	ret = qcom_vadc_map_voltage_temp(adcmap_oem_therm,
+				 ARRAY_SIZE(adcmap_oem_therm),
+				 voltage, &result);
+	if (ret)
+		return ret;
+
+	*result_mdec = result;
+
+	return 0;
+}
+
 int qcom_vadc_scale(enum vadc_scale_fn_type scaletype,
 		    const struct vadc_linear_graph *calib_graph,
 		    const struct vadc_prescale_ratio *prescale,
@@ -1366,6 +1433,9 @@ int qcom_vadc_hw_scale(enum vadc_scale_fn_type scaletype,
 						adc_code, result);
 	case SCALE_HW_CALIB_PMIC_THERM_PM7:
 		return qcom_vadc7_scale_hw_calib_die_temp(prescale, data,
+						adc_code, result);
+	case SCALE_OEM_THERM:
+		return qcom_vadc_scale_oem_therm(prescale, data,
 						adc_code, result);
 	default:
 		return -EINVAL;

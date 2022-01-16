@@ -2,6 +2,11 @@
 /*
  * Copyright (c) 2012-2020, The Linux Foundation. All rights reserved.
  */
+/*
+ * This software is contributed or developed by KYOCERA Corporation.
+ * (C) 2020 KYOCERA Corporation
+ * (C) 2021 KYOCERA Corporation
+ */
 
 #include <linux/module.h>
 #include <linux/kernel.h>
@@ -35,6 +40,7 @@
 #include <linux/kallsyms.h>
 #include <linux/math64.h>
 #endif
+#include <linux/kcjlog.h>
 
 #define MODULE_NAME "msm_watchdog"
 #define WDT0_ACCSCSSNBARK_INT 0
@@ -722,6 +728,7 @@ void msm_trigger_wdog_bite(void)
 
 	compute_irq_stat(&wdog_data->irq_counts_work);
 	pr_info("Causing a watchdog bite!");
+	set_smem_kcjlog(SYSTEM_KERNEL,KIND_WDOG_HW);
 	__raw_writel(1, wdog_data->base + WDT0_BITE_TIME);
 	/* Mke sure bite time is written before we reset */
 	mb();
@@ -753,11 +760,11 @@ static irqreturn_t wdog_bark_handler(int irq, void *dev_id)
 	unsigned long long t = sched_clock();
 
 	nanosec_rem = do_div(t, 1000000000);
-	dev_info(wdog_dd->dev, "Watchdog bark! Now = %lu.%06lu\n",
+	dev_err(wdog_dd->dev, "Watchdog bark! Now = %lu.%06lu\n",
 			(unsigned long) t, nanosec_rem / 1000);
 
 	nanosec_rem = do_div(wdog_dd->last_pet, 1000000000);
-	dev_info(wdog_dd->dev, "Watchdog last pet at %lu.%06lu\n",
+	dev_err(wdog_dd->dev, "Watchdog last pet at %lu.%06lu\n",
 			(unsigned long) wdog_dd->last_pet, nanosec_rem / 1000);
 	if (wdog_dd->do_ipi_ping)
 		dump_cpu_alive_mask(wdog_dd);

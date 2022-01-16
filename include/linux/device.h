@@ -1665,6 +1665,15 @@ do {									\
 })
 #endif
 
+/* debug console flag */
+unsigned long ufs_console_log_flag_getter(void);
+#define CONSOLE_LOG_FLAG_UFS (1 << 0)
+#define CONSOLE_LOG_FLAG_SD (1 << 1)
+#define CONSOLE_LOG_FLAG_MASK ( CONSOLE_LOG_FLAG_UFS | \
+								CONSOLE_LOG_FLAG_SD )
+
+unsigned long console_log_flag_getter( unsigned long flag_sel );
+
 /*
  * dev_WARN*() acts like dev_printk(), but with the key difference of
  * using WARN/WARN_ONCE to include file/line information and a backtrace.

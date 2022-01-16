@@ -1,3 +1,7 @@
+/*
+ * This software is contributed or developed by KYOCERA Corporation.
+ * (C) 2020 KYOCERA Corporation
+ */
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
  * Copyright (c) 2018-2019 The Linux Foundation. All rights reserved.
@@ -102,6 +106,7 @@ enum {
 #define CHGR_ADC_RECHARGE_THRESHOLD_LSB_REG	(CHGR_BASE + 0x7F)
 
 #define JEITA_EN_CFG_REG			(CHGR_BASE + 0x90)
+#define JEITA_EN_HARDLIMIT_BIT			BIT(4)
 #define JEITA_EN_HOT_SL_FCV_BIT			BIT(3)
 #define JEITA_EN_COLD_SL_FCV_BIT		BIT(2)
 #define JEITA_EN_HOT_SL_CCC_BIT			BIT(1)
@@ -376,6 +381,10 @@ enum {
 #define U_USB_FMB2_BIT				BIT(1)
 #define U_USB_FLOAT2_BIT			BIT(0)
 
+#define TYPE_C_ONE_TIME_EXIT_CONTROL_REG			(TYPEC_BASE + 0x42)
+#define ONE_TIME_EXIT_SRC_BIT						BIT(1)
+#define ONE_TIME_EXIT_SNK_BIT						BIT(0)
+
 #define TYPE_C_MODE_CFG_REG			(TYPEC_BASE + 0x44)
 #define TYPEC_TRY_MODE_MASK			GENMASK(4, 3)
 #define EN_TRY_SNK_BIT				BIT(4)
@@ -416,6 +425,10 @@ enum {
 	TYPEC_SRC_RP_3A_DUPLICATE,
 	TYPEC_SRC_RP_MAX_ELEMENTS
 };
+
+#define TYPE_C_CC_RD_CURRSRC_CONTROL_REG			(TYPEC_BASE + 0x5C)
+#define TYPEC_CC_CONTROL_CC2_FORCE_MASK				GENMASK(3, 2)
+#define TYPEC_CC_CONTROL_CC1_FORCE_MASK				GENMASK(1, 0)
 
 #define TYPE_C_INTERRUPT_EN_CFG_1_REG			(TYPEC_BASE + 0x5E)
 #define TYPEC_LEGACY_CABLE_INT_EN_BIT			BIT(7)

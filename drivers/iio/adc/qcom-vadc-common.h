@@ -1,3 +1,7 @@
+/*
+ * This software is contributed or developed by KYOCERA Corporation.
+ * (C) 2020 KYOCERA Corporation
+ */
 /* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Code shared between the different Qualcomm PMIC voltage ADCs
@@ -199,6 +203,7 @@ enum vadc_scale_fn_type {
 	SCALE_HW_CALIB_THERM_100K_PU_PM7,
 	SCALE_HW_CALIB_PMIC_THERM_PM7,
 	SCALE_HW_CALIB_MAX,
+	SCALE_OEM_THERM,
 };
 
 struct adc_data {

@@ -7,6 +7,10 @@
  * Authors: Felipe Balbi <balbi@ti.com>,
  *	    Sebastian Andrzej Siewior <bigeasy@linutronix.de>
  */
+/*
+ * This software is contributed or developed by KYOCERA Corporation.
+ * (C) 2020 KYOCERA Corporation
+ */
 
 #include <linux/clk.h>
 #include <linux/version.h>
@@ -38,6 +42,9 @@
 #include "io.h"
 
 #include "debug.h"
+
+#include <linux/soc/qcom/smem.h>
+#include <soc/qcom/oem_fact.h>
 
 #define DWC3_DEFAULT_AUTOSUSPEND_DELAY	500 /* ms */
 
@@ -218,7 +225,9 @@ static int dwc3_core_soft_reset(struct dwc3 *dwc)
 		 * Setting Max speed as high when USB3 PHY initialiation
 		 * is failing and USB superspeed can't be supported.
 		 */
-		dwc->maximum_speed = USB_SPEED_HIGH;
+		if (oem_fact_get_option_bit(OEM_FACT_OPTION_ITEM_03, 0) == 0) {
+			dwc->maximum_speed = USB_SPEED_HIGH;
+		}
 	} else if (ret) {
 		pr_err("%s: usb_phy_init(dwc->usb3_phy) returned %d\n",
 				__func__, ret);
@@ -1340,8 +1349,13 @@ static void dwc3_get_properties(struct dwc3 *dwc)
 				 &dwc->fladj);
 	dwc->enable_bus_suspend = device_property_read_bool(dev,
 					"snps,bus-suspend-enable");
+#if 0
 	dwc->usb3_u1u2_disable = device_property_read_bool(dev,
 					"snps,usb3-u1u2-disable");
+#else
+	dwc->usb3_u1u2_disable = false;
+#endif
+
 	dwc->disable_clk_gating = device_property_read_bool(dev,
 					"snps,disable-clk-gating");
 
@@ -1515,7 +1529,17 @@ static int dwc3_probe(struct platform_device *pdev)
 	dwc->regs_size	= resource_size(&dwc_res);
 
 	dwc3_get_properties(dwc);
-
+#ifndef  CONFIG_KC_USB_SS
+	if (oem_fact_get_option_bit(OEM_FACT_OPTION_ITEM_03, 0)) {
+		dwc->max_hw_supp_speed = dwc->maximum_speed = USB_SPEED_FULL;
+	} else {
+		dwc->max_hw_supp_speed = dwc->maximum_speed = USB_SPEED_HIGH;
+	}
+#else
+	if (oem_fact_get_option_bit(OEM_FACT_OPTION_ITEM_03, 0)) {
+		dwc->maximum_speed = USB_SPEED_FULL;
+	}
+#endif
 	dwc->reset = devm_reset_control_get_optional_shared(dev, NULL);
 	if (IS_ERR(dwc->reset))
 		goto skip_clk_reset;

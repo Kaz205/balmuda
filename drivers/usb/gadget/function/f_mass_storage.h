@@ -1,4 +1,9 @@
 /* SPDX-License-Identifier: GPL-2.0 */
+/*
+ * This software is contributed or developed by KYOCERA Corporation.
+ * (C) 2018 KYOCERA Corporation
+ */
+
 #ifndef USB_F_MASS_STORAGE_H
 #define USB_F_MASS_STORAGE_H
 
@@ -105,6 +110,8 @@ struct fsg_config {
 	const char *vendor_name;		/*  8 characters or less */
 	const char *product_name;		/* 16 characters or less */
 
+	u16   release;
+
 	char			can_stall;
 	unsigned int		fsg_num_buffers;
 };
@@ -140,5 +147,14 @@ void fsg_common_set_inquiry_string(struct fsg_common *common, const char *vn,
 void fsg_config_from_params(struct fsg_config *cfg,
 			    const struct fsg_module_parameters *params,
 			    unsigned int fsg_num_buffers);
+
+void set_vendor_sdev(struct fsg_common *common, struct switch_dev *sdevice);
+int set_vendor_cmd_1(const char *buf, struct fsg_common *common);
+int set_vendor_cmd_2(const char *buf, struct fsg_common *common);
+#ifdef CONFIG_KC_USB_CDROM
+int set_vendor_cmd_3(const char *buf, struct fsg_common *common);
+ssize_t get_lun_chg(char *buf, struct fsg_common *common);
+int set_lun_chg(const char *buf, struct fsg_common *common);
+#endif /* CONFIG_KC_USB_CDROM */
 
 #endif /* USB_F_MASS_STORAGE_H */

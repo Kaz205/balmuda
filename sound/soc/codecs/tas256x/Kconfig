@@ -1,0 +1,29 @@
+# This software is contributed or developed by KYOCERA Corporation.
+# (C) 2021 KYOCERA Corporation
+#
+# TI Smart Audio tas256X kernel driver
+# Needed I2C and I2S bus support.
+
+config SND_SOC_TAS256X
+	tristate "Build TI TAS256X ASoC CODEC drivers"
+	depends on I2C
+	help
+	TI Smart Audio tas256X kernel driver
+
+config TAS2563_CODEC
+	tristate "Build TI TAS256X ASoC CODEC drivers"
+	depends on I2C
+	help
+	TI Smart Audio tas256X kernel driver
+
+config TAS2563_MISC
+	tristate "Build TI TAS256X ASoC CODEC drivers"
+	depends on I2C
+	help
+	TI Smart Audio tas256X kernel driver
+
+config TAS2563_REGMAP
+	tristate "Build TI TAS256X ASoC CODEC drivers"
+	depends on I2C
+	help
+	TI Smart Audio tas256X kernel driver

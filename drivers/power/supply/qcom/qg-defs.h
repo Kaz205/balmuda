@@ -1,3 +1,7 @@
+/*
+ * This software is contributed or developed by KYOCERA Corporation.
+ * (C) 2020 KYOCERA Corporation
+ */
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
  * Copyright (c) 2018-2019 The Linux Foundation. All rights reserved.
@@ -47,5 +51,18 @@
 
 #define QG_SOC_FULL	10000
 #define BATT_SOC_32BIT	GENMASK(31, 0)
+
+/*-------*/
+#define CYCLE_COUNT_VOTER				"CYCLE_COUNT_VOTER"
+#define CONT_CHG_VOTER					"CONT_CHG_VOTER"
+#define BATT_CARE_VOTER					"BATT_CARE_VOTER"
+#define DNAND_CHG_CYCLE_SIZE			32
+#define DNAND_OFFSET_CYCLE_COUNT		11
+#define DNAND_OFFSET_CYC_CTR_CHG_INC	13
+#define DNAND_OFFSET_TOTAL_CONNECT_TIME	14
+#define DNAND_OFFSET_BATT_CARE_MODE		18
+#define ONLINE_TIME_CHECK_CYCLE			600000	/* 10minutes */
+#define TIME_CHECK_CAPACITY				95
+/*-------*/
 
 #endif /* __QG_DEFS_H__ */

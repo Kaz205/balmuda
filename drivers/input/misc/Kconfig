@@ -886,3 +886,23 @@ config INPUT_SC27XX_VIBRA
 	  be called sc27xx_vibra.
 
 endif
+
+config INPUT_MISC_SENSORS
+	bool "Enable OEM Sensor Driver Support"
+	default y
+	help
+	Add support for oem sensor driver.
+
+config INPUT_MISC_SENSOR_MICON
+	bool "Enable OEM Sensor Micon Support"
+	default y
+	help
+	Add support for oem micon driver.
+
+if INPUT_MISC_SENSORS
+source "drivers/input/misc/sensors/Kconfig"
+endif
+if INPUT_MISC_SENSOR_MICON
+source "drivers/input/misc/micon/Kconfig"
+endif
+

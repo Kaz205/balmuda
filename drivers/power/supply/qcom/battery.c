@@ -1,3 +1,7 @@
+/*
+ * This software is contributed or developed by KYOCERA Corporation.
+ * (C) 2020 KYOCERA Corporation
+ */
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2017-2020 The Linux Foundation. All rights reserved.
@@ -75,8 +79,12 @@ struct pl_data {
 	struct power_supply	*batt_psy;
 	struct power_supply	*usb_psy;
 	struct power_supply	*dc_psy;
+#ifdef CONFIG_OEM_WIRELESS_CHARGER
+	struct power_supply	*wchg_psy;
+#endif
 	struct power_supply	*cp_master_psy;
 	struct power_supply	*cp_slave_psy;
+	struct power_supply	*qg_psy;
 	int			charge_type;
 	int			total_settled_ua;
 	int			pl_settled_ua;
@@ -1052,6 +1060,20 @@ static void fcc_stepper_work(struct work_struct *work)
 		charger_present |= pval.intval;
 	}
 
+#ifdef CONFIG_OEM_WIRELESS_CHARGER
+	/*Check whether wireless charger is present or not */
+	if (!chip->wchg_psy)
+		chip->wchg_psy = power_supply_get_by_name("wireless");
+	if (chip->wchg_psy) {
+		rc = power_supply_get_property(chip->wchg_psy,
+				POWER_SUPPLY_PROP_PRESENT, &pval);
+		if (rc < 0)
+			pr_err("Couldn't get wireless Present status, rc=%d\n", rc);
+
+		charger_present |= pval.intval;
+	}
+#endif
+
 	/*
 	 * If USB is not present, then set parallel FCC to min value and
 	 * main FCC to the effective value of FCC votable and exit.
@@ -1207,6 +1229,7 @@ static bool is_batt_available(struct pl_data *chip)
 }
 
 #define PARALLEL_FLOAT_VOLTAGE_DELTA_UV 50000
+#define OEM_RECHARGE_VOLTAGE_COMP_MV 200
 static int pl_fv_vote_callback(struct votable *votable, void *data,
 			int fv_uv, const char *client)
 {
@@ -1237,6 +1260,23 @@ static int pl_fv_vote_callback(struct votable *votable, void *data,
 			pr_err("Couldn't set float on parallel rc=%d\n", rc);
 			return rc;
 		}
+	}
+
+	if (!chip->qg_psy)
+		chip->qg_psy = power_supply_get_by_name("bms");
+	if (chip->qg_psy) {
+		rc = power_supply_set_property(chip->qg_psy,
+				POWER_SUPPLY_PROP_VOLTAGE_MAX, &pval);
+		if (rc < 0) {
+			pr_err("Couldn't set bms fv, rc=%d\n", rc);
+		}
+	}
+
+	pval.intval = (fv_uv / 1000) - OEM_RECHARGE_VOLTAGE_COMP_MV;
+	rc = power_supply_set_property(chip->main_psy,
+			POWER_SUPPLY_PROP_OEM_RECHARGE_VOL, &pval);
+	if (rc < 0) {
+		pr_err("Couldn't set main recharge_uv, rc=%d\n", rc);
 	}
 
 	/*
@@ -1347,6 +1387,17 @@ static int usb_icl_vote_callback(struct votable *votable, void *data,
 			}
 			dc_present = pval.intval;
 		}
+#ifdef CONFIG_OEM_WIRELESS_CHARGER
+		if (chip->wchg_psy) {
+			rc = power_supply_get_property(chip->wchg_psy,
+					POWER_SUPPLY_PROP_PRESENT, &pval);
+			if (rc < 0) {
+				pr_err("Couldn't get wireless PRESENT rc=%d\n", rc);
+				return rc;
+			}
+			dc_present |= pval.intval;
+		}
+#endif
 
 		/* Don't configure ILIM if DC is present */
 		if (!dc_present)

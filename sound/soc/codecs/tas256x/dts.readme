@@ -1,0 +1,13 @@
+example for dts:
+		tas2563@4c {
+			compatible = "ti,tas2563";
+			reg = <0x4c>;
+			ti,reset-gpio = <&msmgpio 13 0>;
+			ti,irq-gpio = <&msmgpio 59 0>;
+			ti,asi-format = <0>; /* 0, i2S; 1, DSP;  */
+			ti,left-slot = <0>; /* <left slot number> */
+			ti,right-slot = <1>; /* <right slot number> */
+			ti,imon-slot-no = <0>; /* <current sense slot number> */
+			ti,vmon-slot-no = <2>; /* <current voltage slot number> */
+			status = "ok";
+		};

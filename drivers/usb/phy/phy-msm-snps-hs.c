@@ -3,6 +3,11 @@
  * Copyright (c) 2017-2020, The Linux Foundation. All rights reserved.
  */
 
+/*
+ * This software is contributed or developed by KYOCERA Corporation.
+ * (C) 2020 KYOCERA Corporation
+ */
+
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/err.h>
@@ -336,8 +341,11 @@ static void hsusb_phy_write_seq(void __iomem *base, u32 *seq, int cnt,
 	for (i = 0; i < cnt; i = i+2) {
 		pr_debug("write 0x%02x to 0x%02x\n", seq[i], seq[i+1]);
 		writel_relaxed(seq[i], base + seq[i+1]);
+
 		if (delay)
 			usleep_range(delay, (delay + 2000));
+
+		pr_debug("(hsusb) read 0x%02x = 0x%02x\n", seq[i+1], readb_relaxed(base + seq[i+1]));
 	}
 }
 

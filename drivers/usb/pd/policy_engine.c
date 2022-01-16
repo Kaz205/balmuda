@@ -3,6 +3,11 @@
  * Copyright (c) 2016-2021, The Linux Foundation. All rights reserved.
  */
 
+/*
+ * This software is contributed or developed by KYOCERA Corporation.
+ * (C) 2018 KYOCERA Corporation
+ * (C) 2020 KYOCERA Corporation
+ */
 #include <linux/completion.h>
 #include <linux/delay.h>
 #include <linux/hrtimer.h>
@@ -347,13 +352,19 @@ static void *usbpd_ipc_log;
 #define ID_HDR_PRODUCT_AMA	5
 #define ID_HDR_PRODUCT_VPD	6
 
+//#define PD_MIN_SINK_CURRENT	900
+#define PD_MIN_SINK_CURRENT	750
+#define USB_PD_MAX_CURRENT 1900000
+
 /* params for usb_blocking_sync */
 #define STOP_USB_HOST		0
 #define START_USB_HOST		1
 
-#define PD_MIN_SINK_CURRENT	900
-
-static const u32 default_src_caps[] = { 0x36019096 };	/* VSafe5V @ 1.5A */
+#ifndef CONFIG_KC_USB_SRC_CAP_900
+static const u32 default_src_caps[] = { 0x3601904B };	/* VSafe5V @ 0.75A */
+#else
+static const u32 default_src_caps[] = { 0x3601905A };	/* VSafe5V @ 0.9A */
+#endif
 static const u32 default_snk_caps[] = { 0x2601912C };	/* VSafe5V @ 3A */
 
 struct vdm_tx {
@@ -495,6 +506,19 @@ static const unsigned int usbpd_extcon_cable[] = {
 	EXTCON_DISP_DP,
 	EXTCON_NONE,
 };
+
+bool is_vbus_active(void)
+{
+	union power_supply_propval prop = {0,};
+	int rc;
+	int is_vbus_active;
+	struct power_supply *usb_psy;
+	usb_psy = power_supply_get_by_name("usb");
+	rc = power_supply_get_property( usb_psy, POWER_SUPPLY_PROP_PRESENT, &prop);
+	is_vbus_active = prop.intval ;
+	printk(KERN_ERR "qcj: %s: vbus_active = %d\n", __func__, is_vbus_active);
+	return is_vbus_active;
+}
 
 struct usbpd_state_handler {
 	void (*enter_state)(struct usbpd *pd);
@@ -1804,7 +1828,7 @@ static void handle_get_src_cap_extended(struct usbpd *pd)
 		u8  pdp;
 	} __packed caps = {0};
 
-	caps.vid = 0x5c6;
+	caps.vid = 0x482;
 	caps.num_batt = 1;
 	caps.pdp = 5 * PD_SRC_PDO_FIXED_MAX_CURR(default_src_caps[0]) / 100;
 
@@ -2812,6 +2836,9 @@ static void handle_state_snk_select_capability(struct usbpd *pd,
 			int mv = max(pd->requested_voltage,
 					pd->current_voltage) / 1000;
 			val.intval = (2500000 / mv) * 1000;
+
+			/* set USB PD max current value */
+			if (val.intval > USB_PD_MAX_CURRENT) val.intval = USB_PD_MAX_CURRENT;
 			power_supply_set_property(pd->usb_psy,
 				POWER_SUPPLY_PROP_PD_CURRENT_MAX, &val);
 		} else {
@@ -2822,6 +2849,8 @@ static void handle_state_snk_select_capability(struct usbpd *pd,
 				pd->requested_current < val.intval) {
 				val.intval =
 					pd->requested_current * 1000;
+				/* set USB PD max current value */
+				if (val.intval > USB_PD_MAX_CURRENT) val.intval = USB_PD_MAX_CURRENT;
 				power_supply_set_property(pd->usb_psy,
 				     POWER_SUPPLY_PROP_PD_CURRENT_MAX,
 				     &val);
@@ -2866,6 +2895,8 @@ static void handle_state_snk_transition_sink(struct usbpd *pd,
 
 		/* resume charging */
 		val.intval = pd->requested_current * 1000; /* mA->uA */
+		/* set USB PD max current value */
+		if (val.intval > USB_PD_MAX_CURRENT) val.intval = USB_PD_MAX_CURRENT;
 		power_supply_set_property(pd->usb_psy,
 				POWER_SUPPLY_PROP_PD_CURRENT_MAX, &val);
 

@@ -3,6 +3,12 @@
  * Copyright (c) 2012-2020, The Linux Foundation. All rights reserved.
  */
 
+/*
+ * This software is contributed or developed by KYOCERA Corporation.
+ * (C) 2018 KYOCERA Corporation
+ * (C) 2020 KYOCERA Corporation
+ */
+
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/slab.h>
@@ -39,6 +45,8 @@
 #include <linux/extcon.h>
 #include <linux/reset.h>
 #include <linux/clk/qcom.h>
+#include <soc/qcom/oem_fact.h>
+#include <linux/switch.h>
 
 #include "power.h"
 #include "core.h"
@@ -47,7 +55,12 @@
 #include "debug.h"
 #include "xhci.h"
 
+#ifdef CONFIG_KC_USB_US
+#define SDP_CONNETION_CHECK_TIME 3000 /* in ms */
+#else
 #define SDP_CONNETION_CHECK_TIME 10000 /* in ms */
+#endif /* CONFIG_KC_USB_US */
+
 #define EXTCON_SYNC_EVENT_TIMEOUT_MS 1500 /* in ms */
 
 /* time out to wait for USB cable status notification (in ms)*/
@@ -62,6 +75,10 @@
 /* XHCI registers */
 #define USB3_HCSPARAMS1		(0x4)
 #define USB3_PORTSC		(0x420)
+
+#define KC_VENDOR_ONLINE_NAME  "usb_cable"
+
+static struct switch_dev sdev;
 
 /**
  *  USB QSCRATCH Hardware registers
@@ -367,6 +384,14 @@ struct dwc3_msm {
 #define USB_SSPHY_1P8_VOL_MIN		1800000 /* uV */
 #define USB_SSPHY_1P8_VOL_MAX		1800000 /* uV */
 #define USB_SSPHY_1P8_HPM_LOAD		23000	/* uA */
+
+static bool vbus_detect_timer = true;
+
+#ifdef CONFIG_KC_USB_MDM
+static bool disable_host_mode = true;
+module_param(disable_host_mode, bool, S_IRUGO | S_IWUSR);
+MODULE_PARM_DESC(disable_host_mode, "To stop HOST mode detection");
+#endif /* CONFIG_KC_USB_MDM */
 
 static void dwc3_pwr_event_handler(struct dwc3_msm *mdwc);
 static int dwc3_msm_gadget_vbus_draw(struct dwc3_msm *mdwc, unsigned int mA);
@@ -2961,15 +2986,18 @@ static void dwc3_resume_work(struct work_struct *w)
 
 	/* Check speed and Type-C polarity values in order to configure PHY */
 	if (!eud_connected && edev && extcon_get_state(edev, extcon_id)) {
-		dwc->maximum_speed = dwc->max_hw_supp_speed;
-		dwc->gadget.max_speed = dwc->maximum_speed;
-
+		if (oem_fact_get_option_bit(OEM_FACT_OPTION_ITEM_03, 0) == 0) {
+			dwc->maximum_speed = dwc->max_hw_supp_speed;
+			dwc->gadget.max_speed = dwc->maximum_speed;
+		}
 		ret = extcon_get_property(edev, extcon_id,
 				EXTCON_PROP_USB_SS, &val);
 
 		if (!ret && val.intval == 0) {
-			dwc->maximum_speed = USB_SPEED_HIGH;
-			dwc->gadget.max_speed = dwc->maximum_speed;
+			if (oem_fact_get_option_bit(OEM_FACT_OPTION_ITEM_03, 0) == 0) {
+				dwc->maximum_speed = USB_SPEED_HIGH;
+				dwc->gadget.max_speed = dwc->maximum_speed;
+			}
 		}
 
 		if (mdwc->override_usb_speed &&
@@ -3287,6 +3315,8 @@ static void check_for_sdp_connection(struct work_struct *w)
 	 */
 	if (mdwc->usb_compliance_mode)
 		return;
+
+	vbus_detect_timer = false;
 
 	/* floating D+/D- lines detected */
 	if (dwc->gadget.state < USB_STATE_DEFAULT &&
@@ -4280,6 +4310,7 @@ static int dwc3_otg_start_host(struct dwc3_msm *mdwc, int on)
 
 		mdwc->in_host_mode = true;
 		dwc3_usb3_phy_suspend(dwc, true);
+		switch_set_state(&sdev, 0x02);
 
 		/* Reduce the U3 exit handshake timer from 8us to approximately
 		 * 300ns to avoid lfps handshake interoperability issues
@@ -4343,6 +4374,9 @@ static int dwc3_otg_start_host(struct dwc3_msm *mdwc, int on)
 		dwc3_set_prtcap(dwc, DWC3_GCTL_PRTCAP_DEVICE);
 		dwc3_usb3_phy_suspend(dwc, false);
 		mdwc->in_host_mode = false;
+		switch_set_state(&sdev, 0x00);
+
+		vbus_detect_timer = true;
 
 		/* wait for LPM, to ensure h/w is reset after stop_host */
 		set_bit(WAIT_FOR_LPM, &mdwc->inputs);
@@ -4527,10 +4561,14 @@ static int dwc3_msm_gadget_vbus_draw(struct dwc3_msm *mdwc, unsigned int mA)
 		if (mA == 2)
 			return 0;
 
-		if (!mA)
-			pval.intval = -ETIMEDOUT;
-		else
+		if ( mA > 100 && vbus_detect_timer ) {
+			dev_info(mdwc->dev, "Avail curr from USB = %u\n", mA);
+			/* Set max current limit in uA */
 			pval.intval = 1000 * mA;
+		} else {
+			pr_debug("Floating Cable Detected return ETIMEDOUT");
+			pval.intval = -ETIMEDOUT;
+		}
 		goto set_prop;
 	}
 
@@ -4585,6 +4623,9 @@ static void dwc3_otg_sm_work(struct work_struct *w)
 	/* Check OTG state */
 	switch (mdwc->drd_state) {
 	case DRD_STATE_UNDEFINED:
+		sdev.name = KC_VENDOR_ONLINE_NAME;
+		ret = switch_dev_register(&sdev);
+
 		if (mdwc->dpdm_nb.notifier_call) {
 			regulator_unregister_notifier(mdwc->dpdm_reg,
 					&mdwc->dpdm_nb);
@@ -4627,6 +4668,7 @@ static void dwc3_otg_sm_work(struct work_struct *w)
 				queue_delayed_work(mdwc->dwc3_wq,
 						&mdwc->sdp_check,
 				msecs_to_jiffies(SDP_CONNETION_CHECK_TIME));
+				switch_set_state(&sdev, 0x01);
 
 			/*
 			 * Increment pm usage count upon cable connect. Count
@@ -4641,6 +4683,7 @@ static void dwc3_otg_sm_work(struct work_struct *w)
 			work = 1;
 		} else {
 			dwc3_msm_gadget_vbus_draw(mdwc, 0);
+			switch_set_state(&sdev, 0x00);
 			dev_dbg(mdwc->dev, "Cable disconnected\n");
 		}
 		break;
@@ -4708,6 +4751,14 @@ static void dwc3_otg_sm_work(struct work_struct *w)
 			mdwc->vbus_retry_count = 0;
 			work = 1;
 		} else {
+#ifdef CONFIG_KC_USB_MDM
+			if(disable_host_mode) {
+				dev_info(mdwc->dev, "skip USB host mode %s\n", __func__);
+				break;
+			}
+#endif /* CONFIG_KC_USB_MDM */
+			mdwc->drd_state = DRD_STATE_HOST;
+
 			ret = dwc3_otg_start_host(mdwc, 1);
 			if ((ret == -EPROBE_DEFER) &&
 						mdwc->vbus_retry_count < 3) {
