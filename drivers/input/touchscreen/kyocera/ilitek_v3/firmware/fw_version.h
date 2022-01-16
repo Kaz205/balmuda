@@ -21,7 +21,7 @@
 #define __FW_VERSION_H
 
 /* FW Version */
-#define KCTOUCH_FW_BIN_VERSION		0x4200400
+#define KCTOUCH_FW_BIN_VERSION		0x4200600
 
 
 #endif /* __FW_VERSION_H */

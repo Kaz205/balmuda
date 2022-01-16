@@ -35,8 +35,8 @@
 
 #define DEFAULT_WCHG_ICL		(900 * 1000)
 #define DEFAULT_WCHG_MSEC		(500)
-#define DEFAULT_FV				(4350 * 1000)
-#define DEFAULT_CCCV_THRESH		(4340 * 1000)
+#define DEFAULT_FV				(4380 * 1000)
+#define DEFAULT_CCCV_THRESH		(4370 * 1000)
 #define DEFAULT_WARM_THRESH		(431)
 #define DEFAULT_TEMP_HYSTERESIS	(20)
 #define DEFAULT_TEMP			(600)
@@ -105,6 +105,7 @@ struct oem_wchg_chip {
 	bool					resume_completed;
 	bool					initialized;
 	bool					wchg_dummy;
+	bool					wchg_boot_flag;
 	int						wchg_nen;
 	int						wchg_en;
 	int						wchg_int_n;
@@ -143,6 +144,7 @@ struct oem_wchg_chip {
 	int						wchg_bpp_step_init_ua;
 	int						wchg_epp_step_init_ua;
 	int						wchg_steble_msec;
+	int						default_fv_uv;
 	int						wchg_fv_uv;
 	int						wchg_cccv_threshold;
 	int						wchg_cccv_threshold_warm;
@@ -864,6 +866,12 @@ static int oem_wireless_chg_set_property(struct power_supply *psy,
 			if (val->intval) {
 				vote(chip->fv_votable, OEM_DET_WCHG_VOTER, true, chip->wchg_fv_uv);
 			} else {
+				if (chip->wchg_boot_flag) {
+					chip->wchg_boot_flag = false;
+					ret.intval = chip->default_fv_uv;
+					rc = power_supply_set_property(chip->batt_psy, POWER_SUPPLY_PROP_VOLTAGE_MAX, &ret);
+				}
+
 				vote(chip->fv_votable, OEM_DET_WCHG_VOTER, false, 0);
 			}
 		}
@@ -1191,6 +1199,13 @@ static int oem_wireless_chg_parse_dt(struct oem_wchg_chip *chip)
 		chip->wchg_steble_msec = DEFAULT_WCHG_MSEC;
 	}
 
+	rc = of_property_read_u32(node, "oem,fv-max-uv",
+			&chip->default_fv_uv);
+	if (rc < 0) {
+		dev_err(chip->dev, "oem,fv-max-uv can't get.\n");
+		chip->default_fv_uv = DEFAULT_FV;
+	}
+
 	rc = of_property_read_u32(node, "oem,wchg-fv-uv",
 			&chip->wchg_fv_uv);
 	if (rc < 0) {
@@ -1430,6 +1445,7 @@ static int oem_wireless_chg_probe(struct platform_device *pdev)
 
 	if (is_wireless_present(chip)) {
 		pr_debug("When OFF charging starts wirelessly\n");
+		chip->wchg_boot_flag = true;
 
 		if (!chip->fv_votable) {
 			chip->fv_votable = find_votable("FV");

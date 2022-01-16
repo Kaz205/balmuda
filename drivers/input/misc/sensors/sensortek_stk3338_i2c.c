@@ -1,6 +1,7 @@
 /* This software is contributed or developed by KYOCERA Corporation.
  * (C) 2019 KYOCERA Corporation
  * (C) 2020 KYOCERA Corporation
+ * (C) 2021 KYOCERA Corporation
  */
 #include <linux/i2c.h>
 #include <linux/interrupt.h>
@@ -119,6 +120,7 @@ typedef struct {
 	struct work_struct	ps_work;		/* structure for work queue                 */
 	struct work_struct	als_work;		/* structure for work queue                 */
 	struct delayed_work	monitor_dwork;
+	struct delayed_work boot_ps_report_work;
     struct work_struct ps_cal_work;
 	int			delay_time;				/* delay time to set from application       */
 	struct ps_sensor_info	ps_info;
@@ -761,9 +763,8 @@ static void ps_sensor_report_event_proc(PS_ALS_DATA *ps_als, uint32_t detect)
 	SENSOR_D_LOG("end");
 }
 
-static void ps_work_func(struct work_struct *ps_work)
+static void ps_work_func_internal(PS_ALS_DATA *ps_als)
 {
-	PS_ALS_DATA *ps_als = container_of(ps_work, PS_ALS_DATA, ps_work);
 	int         	result;
 	PWR_ST        	pwr_st;
 	GENREAD_ARG   	gene_data;
@@ -827,6 +828,12 @@ exit:
     ps_sensor_clr_interrupt(ps_als->client, flag_ps);
 	ps_als->int_flg = true;
 	SENSOR_D_LOG("end");
+}
+
+static void ps_work_func(struct work_struct *ps_work)
+{
+        PS_ALS_DATA *ps_als = container_of(ps_work, PS_ALS_DATA, ps_work);
+        ps_work_func_internal(ps_als);
 }
 
 /******************************************************************************
@@ -1407,6 +1414,21 @@ static void ps_als_monitor_func(struct work_struct *work)
 	SENSOR_D_LOG("end");
 }
 
+static void ps_als_schedule_boot_ps_report(PS_ALS_DATA *ps_als)
+{
+	SENSOR_D_LOG("start");
+	queue_delayed_work(sensortek_workqueue, &ps_als->boot_ps_report_work, msecs_to_jiffies(200));
+	SENSOR_D_LOG("end");
+}
+
+static void ps_als_boot_ps_report_func(struct work_struct *work)
+{
+	PS_ALS_DATA *ps_als = container_of(work, PS_ALS_DATA, boot_ps_report_work.work);
+	SENSOR_D_LOG("start");
+	ps_work_func_internal(ps_als);
+	SENSOR_D_LOG("end");
+}
+
 static int ps_als_power_ctrl(PS_ALS_DATA *ps_als, enum ps_als_power_ctrl_mode request_mode);
 static int als_enable_proc(PS_ALS_DATA *ps_als, unsigned char enable)
 {
@@ -1598,7 +1620,9 @@ static int ps_enable_proc(PS_ALS_DATA *ps_als, unsigned char enable)
 
 	if (enable) {
 		ps_als_schedule_monitor(ps_als);
+		ps_als->ps_det = PROX_DUMMY_VALUE;
 		ps_als->power_data.power_ps = enable;
+		ps_als_schedule_boot_ps_report(ps_als);
 	} else {
 		disable_irq(ps_als->client->irq);
 
@@ -3558,6 +3582,7 @@ static int ps_als_probe(struct i2c_client *client, const struct i2c_device_id *i
 	INIT_WORK(&ps_als->ps_work, ps_work_func);
 	INIT_WORK(&ps_als->ps_cal_work, ps_cal_func);
 	INIT_DELAYED_WORK(&ps_als->monitor_dwork, ps_als_monitor_func);
+	INIT_DELAYED_WORK(&ps_als->boot_ps_report_work, ps_als_boot_ps_report_func);
 	mutex_init(&ps_als->control_lock);
 	mutex_init(&ps_als->ps_data_lock);
 	mutex_init(&ps_als->als_data_lock);
