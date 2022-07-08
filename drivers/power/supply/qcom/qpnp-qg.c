@@ -3236,32 +3236,130 @@ static int qg_load_battery_profile(struct qpnp_qg *chip)
 		chip->bp.oem_batt_capacity_mah = -EINVAL;
 	}
 
-	rc = of_property_read_u32(profile_node, "oem,deterioration-thresh-good",
-				&chip->bp.oem_deterioration_thresh_good);
+	rc = of_property_read_u32(profile_node, "oem,deterioration-thresh-100",
+				&chip->bp.oem_deterioration_thresh_100);
 	if (rc < 0) {
-		pr_err("deterioration thresh good unavailable, rc:%d\n", rc);
-		chip->bp.oem_deterioration_thresh_good = -EINVAL;
+		pr_err("deterioration thresh 100% unavailable, rc:%d\n", rc);
+		chip->bp.oem_deterioration_thresh_100 = -EINVAL;
 	}
 
-	rc = of_property_read_u32(profile_node, "oem,deterioration-thresh-norm",
-				&chip->bp.oem_deterioration_thresh_norm);
+	rc = of_property_read_u32(profile_node, "oem,deterioration-thresh-90",
+				&chip->bp.oem_deterioration_thresh_90);
 	if (rc < 0) {
-		pr_err("deterioration thresh norm unavailable, rc:%d\n", rc);
-		chip->bp.oem_deterioration_thresh_norm = -EINVAL;
+		pr_err("deterioration thresh 90% unavailable, rc:%d\n", rc);
+		chip->bp.oem_deterioration_thresh_90 = -EINVAL;
 	}
 
-	rc = of_property_read_u32(profile_node, "oem,deterioration-thresh-normtogood",
-				&chip->bp.oem_deterioration_thresh_normtogood);
+	rc = of_property_read_u32(profile_node, "oem,deterioration-thresh-80",
+				&chip->bp.oem_deterioration_thresh_80);
 	if (rc < 0) {
-		pr_err("deterioration thresh norm to good unavailable, rc:%d\n", rc);
-		chip->bp.oem_deterioration_thresh_normtogood = -EINVAL;
+		pr_err("deterioration thresh 80% unavailable, rc:%d\n", rc);
+		chip->bp.oem_deterioration_thresh_80 = -EINVAL;
 	}
 
-	rc = of_property_read_u32(profile_node, "oem,deterioration-thresh-deadtonorm",
-				&chip->bp.oem_deterioration_thresh_deadtonorm);
+	rc = of_property_read_u32(profile_node, "oem,deterioration-thresh-70",
+				&chip->bp.oem_deterioration_thresh_70);
 	if (rc < 0) {
-		pr_err("deterioration thresh dead to norm unavailable, rc:%d\n", rc);
-		chip->bp.oem_deterioration_thresh_deadtonorm = -EINVAL;
+		pr_err("deterioration thresh 70% unavailable, rc:%d\n", rc);
+		chip->bp.oem_deterioration_thresh_70 = -EINVAL;
+	}
+
+	rc = of_property_read_u32(profile_node, "oem,deterioration-thresh-60",
+				&chip->bp.oem_deterioration_thresh_60);
+	if (rc < 0) {
+		pr_err("deterioration thresh 60% unavailable, rc:%d\n", rc);
+		chip->bp.oem_deterioration_thresh_60 = -EINVAL;
+	}
+
+	rc = of_property_read_u32(profile_node, "oem,deterioration-thresh-50",
+				&chip->bp.oem_deterioration_thresh_50);
+	if (rc < 0) {
+		pr_err("deterioration thresh 50% unavailable, rc:%d\n", rc);
+		chip->bp.oem_deterioration_thresh_50 = -EINVAL;
+	}
+
+	rc = of_property_read_u32(profile_node, "oem,deterioration-thresh-40",
+				&chip->bp.oem_deterioration_thresh_40);
+	if (rc < 0) {
+		pr_err("deterioration thresh 40% unavailable, rc:%d\n", rc);
+		chip->bp.oem_deterioration_thresh_40 = -EINVAL;
+	}
+
+	rc = of_property_read_u32(profile_node, "oem,deterioration-thresh-30",
+				&chip->bp.oem_deterioration_thresh_30);
+	if (rc < 0) {
+		pr_err("deterioration thresh 30% unavailable, rc:%d\n", rc);
+		chip->bp.oem_deterioration_thresh_30 = -EINVAL;
+	}
+
+	rc = of_property_read_u32(profile_node, "oem,deterioration-thresh-20",
+				&chip->bp.oem_deterioration_thresh_20);
+	if (rc < 0) {
+		pr_err("deterioration thresh 20% unavailable, rc:%d\n", rc);
+		chip->bp.oem_deterioration_thresh_20 = -EINVAL;
+	}
+
+	rc = of_property_read_u32(profile_node, "oem,deterioration-thresh-90to100",
+				&chip->bp.oem_deterioration_thresh_90to100);
+	if (rc < 0) {
+		pr_err("deterioration thresh 90% to 100% unavailable, rc:%d\n", rc);
+		chip->bp.oem_deterioration_thresh_90to100 = -EINVAL;
+	}
+
+	rc = of_property_read_u32(profile_node, "oem,deterioration-thresh-80to90",
+				&chip->bp.oem_deterioration_thresh_80to90);
+	if (rc < 0) {
+		pr_err("deterioration thresh 80% to 90% unavailable, rc:%d\n", rc);
+		chip->bp.oem_deterioration_thresh_80to90 = -EINVAL;
+	}
+
+	rc = of_property_read_u32(profile_node, "oem,deterioration-thresh-70to80",
+				&chip->bp.oem_deterioration_thresh_70to80);
+	if (rc < 0) {
+		pr_err("deterioration thresh 70% to 80% unavailable, rc:%d\n", rc);
+		chip->bp.oem_deterioration_thresh_70to80 = -EINVAL;
+	}
+
+	rc = of_property_read_u32(profile_node, "oem,deterioration-thresh-60to70",
+				&chip->bp.oem_deterioration_thresh_60to70);
+	if (rc < 0) {
+		pr_err("deterioration thresh 60% to 70% unavailable, rc:%d\n", rc);
+		chip->bp.oem_deterioration_thresh_60to70 = -EINVAL;
+	}
+
+	rc = of_property_read_u32(profile_node, "oem,deterioration-thresh-50to60",
+				&chip->bp.oem_deterioration_thresh_50to60);
+	if (rc < 0) {
+		pr_err("deterioration thresh 50% to 60% unavailable, rc:%d\n", rc);
+		chip->bp.oem_deterioration_thresh_50to60 = -EINVAL;
+	}
+
+	rc = of_property_read_u32(profile_node, "oem,deterioration-thresh-40to50",
+				&chip->bp.oem_deterioration_thresh_40to50);
+	if (rc < 0) {
+		pr_err("deterioration thresh 40% to 50% unavailable, rc:%d\n", rc);
+		chip->bp.oem_deterioration_thresh_40to50 = -EINVAL;
+	}
+
+	rc = of_property_read_u32(profile_node, "oem,deterioration-thresh-30to40",
+				&chip->bp.oem_deterioration_thresh_30to40);
+	if (rc < 0) {
+		pr_err("deterioration thresh 30% to 40% unavailable, rc:%d\n", rc);
+		chip->bp.oem_deterioration_thresh_30to40 = -EINVAL;
+	}
+
+	rc = of_property_read_u32(profile_node, "oem,deterioration-thresh-20to30",
+				&chip->bp.oem_deterioration_thresh_20to30);
+	if (rc < 0) {
+		pr_err("deterioration thresh 20% to 30% unavailable, rc:%d\n", rc);
+		chip->bp.oem_deterioration_thresh_20to30 = -EINVAL;
+	}
+
+	rc = of_property_read_u32(profile_node, "oem,deterioration-thresh-10to20",
+				&chip->bp.oem_deterioration_thresh_10to20);
+	if (rc < 0) {
+		pr_err("deterioration thresh 10% to 20% unavailable, rc:%d\n", rc);
+		chip->bp.oem_deterioration_thresh_10to20 = -EINVAL;
 	}
 
 	if (of_find_property(profile_node, "oem,cycle-count-thresh", &byte_len)) {
@@ -4661,7 +4759,7 @@ static int qg_parse_dt(struct qpnp_qg *chip)
 	else
 		chip->dt.esr_low_temp_threshold = (int)temp;
 
-	rc = of_property_read_u32(node, "qcom,shutdown-soc-threshold", &temp);
+	rc = of_property_read_u32(node, "qcom,shutdown_soc_threshold", &temp);
 	if (rc < 0)
 		chip->dt.shutdown_soc_threshold = -EINVAL;
 	else
@@ -4969,9 +5067,16 @@ static const struct dev_pm_ops qpnp_qg_pm_ops = {
 
 /*-------*/
 enum {
-	DETERIORATION_STATUS_GOOD,
-	DETERIORATION_STATUS_NORM,
-	DETERIORATION_STATUS_DEAD,
+	DETERIORATION_STATUS_100,
+	DETERIORATION_STATUS_90,
+	DETERIORATION_STATUS_80,
+	DETERIORATION_STATUS_70,
+	DETERIORATION_STATUS_60,
+	DETERIORATION_STATUS_50,
+	DETERIORATION_STATUS_40,
+	DETERIORATION_STATUS_30,
+	DETERIORATION_STATUS_20,
+	DETERIORATION_STATUS_10,
 	DETERIORATION_STATUS_INIT
 };
 
@@ -4985,13 +5090,13 @@ static int oem_bms_get_deterioration_status(struct qpnp_qg *chip)
 
 	if (!chip->profile_loaded) {
 		pr_info("profile is not ready. return default value.\n");
-		return DETERIORATION_STATUS_GOOD;
+		return DETERIORATION_STATUS_100;
 	}
 
 	rc = qg_get_learned_capacity(chip, &learned_capacity);
 	if (rc < 0 || !learned_capacity) {
 		pr_info("learned capacity is not read. return default value.\n");
-		return DETERIORATION_STATUS_GOOD;
+		return DETERIORATION_STATUS_100;
 	}
 
 	deterioration_degree = (int)((learned_capacity * 100) / (chip->bp.oem_batt_capacity_mah * 1000));
@@ -5001,46 +5106,144 @@ static int oem_bms_get_deterioration_status(struct qpnp_qg *chip)
 
 	switch (deterioration_status) {
 	case DETERIORATION_STATUS_INIT:
-		if (deterioration_degree >= chip->bp.oem_deterioration_thresh_good) {
-			new_deterioration_status = DETERIORATION_STATUS_GOOD;
+		if (deterioration_degree >= chip->bp.oem_deterioration_thresh_100) {
+			new_deterioration_status = DETERIORATION_STATUS_100;
 		}
-		else if (deterioration_degree >= chip->bp.oem_deterioration_thresh_norm) {
-			new_deterioration_status = DETERIORATION_STATUS_NORM;
+		else if (deterioration_degree >= chip->bp.oem_deterioration_thresh_90) {
+			new_deterioration_status = DETERIORATION_STATUS_90;
+		}
+		else if (deterioration_degree >= chip->bp.oem_deterioration_thresh_80) {
+			new_deterioration_status = DETERIORATION_STATUS_80;
+		}
+		else if (deterioration_degree >= chip->bp.oem_deterioration_thresh_70) {
+			new_deterioration_status = DETERIORATION_STATUS_70;
+		}
+		else if (deterioration_degree >= chip->bp.oem_deterioration_thresh_60) {
+			new_deterioration_status = DETERIORATION_STATUS_60;
+		}
+		else if (deterioration_degree >= chip->bp.oem_deterioration_thresh_50) {
+			new_deterioration_status = DETERIORATION_STATUS_50;
+		}
+		else if (deterioration_degree >= chip->bp.oem_deterioration_thresh_40) {
+			new_deterioration_status = DETERIORATION_STATUS_40;
+		}
+		else if (deterioration_degree >= chip->bp.oem_deterioration_thresh_30) {
+			new_deterioration_status = DETERIORATION_STATUS_30;
+		}
+		else if (deterioration_degree >= chip->bp.oem_deterioration_thresh_20) {
+			new_deterioration_status = DETERIORATION_STATUS_20;
 		}
 		else {
-			new_deterioration_status = DETERIORATION_STATUS_DEAD;
+			new_deterioration_status = DETERIORATION_STATUS_10;
 		}
 		break;
-	case DETERIORATION_STATUS_GOOD:
-		if (deterioration_degree >= chip->bp.oem_deterioration_thresh_good) {
-			new_deterioration_status = DETERIORATION_STATUS_GOOD;
+	case DETERIORATION_STATUS_100:
+		if (deterioration_degree >= chip->bp.oem_deterioration_thresh_100) {
+			new_deterioration_status = DETERIORATION_STATUS_100;
 		}
 		else {
-			new_deterioration_status = DETERIORATION_STATUS_NORM;
+			new_deterioration_status = DETERIORATION_STATUS_90;
 		}
 		break;
-	case DETERIORATION_STATUS_NORM:
-		if (deterioration_degree >= chip->bp.oem_deterioration_thresh_normtogood) {
-			new_deterioration_status = DETERIORATION_STATUS_GOOD;
+	case DETERIORATION_STATUS_90:
+		if (deterioration_degree >= chip->bp.oem_deterioration_thresh_90to100) {
+			new_deterioration_status = DETERIORATION_STATUS_100;
 		}
-		else if (deterioration_degree >= chip->bp.oem_deterioration_thresh_norm) {
-			new_deterioration_status = DETERIORATION_STATUS_NORM;
+		else if (deterioration_degree >= chip->bp.oem_deterioration_thresh_90) {
+			new_deterioration_status = DETERIORATION_STATUS_90;
 		}
 		else {
-			new_deterioration_status = DETERIORATION_STATUS_DEAD;
+			new_deterioration_status = DETERIORATION_STATUS_80;
 		}
 		break;
-	case DETERIORATION_STATUS_DEAD:
-		if (deterioration_degree >= chip->bp.oem_deterioration_thresh_deadtonorm) {
-			new_deterioration_status = DETERIORATION_STATUS_NORM;
+	case DETERIORATION_STATUS_80:
+		if (deterioration_degree >= chip->bp.oem_deterioration_thresh_80to90) {
+			new_deterioration_status = DETERIORATION_STATUS_90;
+		}
+		else if (deterioration_degree >= chip->bp.oem_deterioration_thresh_80) {
+			new_deterioration_status = DETERIORATION_STATUS_80;
 		}
 		else {
-			new_deterioration_status = DETERIORATION_STATUS_DEAD;
+			new_deterioration_status = DETERIORATION_STATUS_70;
+		}
+		break;
+	case DETERIORATION_STATUS_70:
+		if (deterioration_degree >= chip->bp.oem_deterioration_thresh_70to80) {
+			new_deterioration_status = DETERIORATION_STATUS_80;
+		}
+		else if (deterioration_degree >= chip->bp.oem_deterioration_thresh_70) {
+			new_deterioration_status = DETERIORATION_STATUS_70;
+		}
+		else {
+			new_deterioration_status = DETERIORATION_STATUS_60;
+		}
+		break;
+	case DETERIORATION_STATUS_60:
+		if (deterioration_degree >= chip->bp.oem_deterioration_thresh_60to70) {
+			new_deterioration_status = DETERIORATION_STATUS_70;
+		}
+		else if (deterioration_degree >= chip->bp.oem_deterioration_thresh_60) {
+			new_deterioration_status = DETERIORATION_STATUS_60;
+		}
+		else {
+			new_deterioration_status = DETERIORATION_STATUS_50;
+		}
+		break;
+	case DETERIORATION_STATUS_50:
+		if (deterioration_degree >= chip->bp.oem_deterioration_thresh_50to60) {
+			new_deterioration_status = DETERIORATION_STATUS_60;
+		}
+		else if (deterioration_degree >= chip->bp.oem_deterioration_thresh_50) {
+			new_deterioration_status = DETERIORATION_STATUS_50;
+		}
+		else {
+			new_deterioration_status = DETERIORATION_STATUS_40;
+		}
+		break;
+	case DETERIORATION_STATUS_40:
+		if (deterioration_degree >= chip->bp.oem_deterioration_thresh_40to50) {
+			new_deterioration_status = DETERIORATION_STATUS_50;
+		}
+		else if (deterioration_degree >= chip->bp.oem_deterioration_thresh_40) {
+			new_deterioration_status = DETERIORATION_STATUS_40;
+		}
+		else {
+			new_deterioration_status = DETERIORATION_STATUS_30;
+		}
+		break;
+	case DETERIORATION_STATUS_30:
+		if (deterioration_degree >= chip->bp.oem_deterioration_thresh_30to40) {
+			new_deterioration_status = DETERIORATION_STATUS_40;
+		}
+		else if (deterioration_degree >= chip->bp.oem_deterioration_thresh_30) {
+			new_deterioration_status = DETERIORATION_STATUS_30;
+		}
+		else {
+			new_deterioration_status = DETERIORATION_STATUS_20;
+		}
+		break;
+	case DETERIORATION_STATUS_20:
+		if (deterioration_degree >= chip->bp.oem_deterioration_thresh_20to30) {
+			new_deterioration_status = DETERIORATION_STATUS_30;
+		}
+		else if (deterioration_degree >= chip->bp.oem_deterioration_thresh_20) {
+			new_deterioration_status = DETERIORATION_STATUS_20;
+		}
+		else {
+			new_deterioration_status = DETERIORATION_STATUS_10;
+		}
+		break;
+	case DETERIORATION_STATUS_10:
+		if (deterioration_degree >= chip->bp.oem_deterioration_thresh_10to20) {
+			new_deterioration_status = DETERIORATION_STATUS_20;
+		}
+		else {
+			new_deterioration_status = DETERIORATION_STATUS_10;
 		}
 		break;
 	default:
 		pr_err("invalid deterioration_status:%d\n", deterioration_status);
-		new_deterioration_status = DETERIORATION_STATUS_GOOD;
+		new_deterioration_status = DETERIORATION_STATUS_100;
 		break;
 	}
 

@@ -47,10 +47,24 @@ struct qg_batt_props {
 
 	/* oem add */
 	int			oem_batt_capacity_mah;
-	int			oem_deterioration_thresh_good;
-	int			oem_deterioration_thresh_norm;
-	int			oem_deterioration_thresh_normtogood;
-	int			oem_deterioration_thresh_deadtonorm;
+	int			oem_deterioration_thresh_100;
+	int			oem_deterioration_thresh_90;
+	int			oem_deterioration_thresh_80;
+	int			oem_deterioration_thresh_70;
+	int			oem_deterioration_thresh_60;
+	int			oem_deterioration_thresh_50;
+	int			oem_deterioration_thresh_40;
+	int			oem_deterioration_thresh_30;
+	int			oem_deterioration_thresh_20;
+	int			oem_deterioration_thresh_90to100;
+	int			oem_deterioration_thresh_80to90;
+	int			oem_deterioration_thresh_70to80;
+	int			oem_deterioration_thresh_60to70;
+	int			oem_deterioration_thresh_50to60;
+	int			oem_deterioration_thresh_40to50;
+	int			oem_deterioration_thresh_30to40;
+	int			oem_deterioration_thresh_20to30;
+	int			oem_deterioration_thresh_10to20;
 	int			oem_float_volt_uv_design;
 	int			*oem_cycle_count_thresh;
 	int			*oem_cycle_count_fv_comp_mv;
