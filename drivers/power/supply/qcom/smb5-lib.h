@@ -696,7 +696,6 @@ struct smb_charger {
 	int			oem_iterm_limit_enable;
 	int			oem_wls_epp_icl_ua;
 	int			oem_wchg_disable_thresh;
-	bool		oem_wchg_ov;
 	bool		oem_wchg_en_status;
 #endif
 #ifdef CONFIG_OEM_HKADC

@@ -10570,6 +10570,14 @@ static int ufshcd_resume(struct ufs_hba *hba, enum ufs_pm_op pm_op)
 	old_link_state = hba->uic_link_state;
 	old_pwr_mode = hba->curr_dev_pwr_mode;
 
+    /*
+     * If scsi host is in recovery mode, force the link to STATE_OFF, so
+     * that we do a full reset and restore instead of sending the SSU cmd,
+     * as SSU cmd can be blocked by SCSI layer, see scsi_host_queue_ready().
+     */
+    if (unlikely(scsi_host_in_recovery(hba->host)))
+        ufshcd_set_link_off(hba);
+
 	ufshcd_hba_vreg_set_hpm(hba);
 
 	ret = ufshcd_vreg_set_hpm(hba);

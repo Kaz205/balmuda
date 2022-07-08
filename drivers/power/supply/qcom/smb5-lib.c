@@ -2125,13 +2125,6 @@ int smblib_get_prop_batt_status(struct smb_charger *chg,
 	}
 	usb_present = pval.intval;
 
-#ifdef CONFIG_OEM_WIRELESS_CHARGER
-	if (chg->oem_wchg_ov && dc_online) {
-		val->intval = POWER_SUPPLY_STATUS_FULL;
-		return 0;
-	}
-#endif
-
 	if (!usb_online && !dc_online) {
 		switch (stat) {
 		case TERMINATE_CHARGE:
@@ -2293,28 +2286,13 @@ int smblib_get_prop_batt_health(struct smb_charger *chg,
 			effective_fv_uv = get_effective_result_locked(
 							chg->fv_votable);
 			if (pval.intval >= effective_fv_uv + 40000) {
-#ifdef CONFIG_OEM_WIRELESS_CHARGER
-				if (oem_chg_get_property_on_wchg(chg, POWER_SUPPLY_PROP_ONLINE) == OEM_WCHG_DET) {
-					chg->oem_wchg_ov = true;
-					val->intval = POWER_SUPPLY_HEALTH_GOOD;
-				} else {
-#endif
 				val->intval = POWER_SUPPLY_HEALTH_OVERVOLTAGE;
 				smblib_err(chg, "battery over-voltage vbat_fg = %duV, fv = %duV\n",
 						pval.intval, effective_fv_uv);
-#ifdef CONFIG_OEM_WIRELESS_CHARGER
-				}
-#endif
 				goto done;
 			}
 		}
 	}
-
-#ifdef CONFIG_OEM_WIRELESS_CHARGER
-	if (chg->oem_wchg_ov) {
-		chg->oem_wchg_ov = false;
-	}
-#endif
 
 	rc = smblib_read(chg, BATTERY_CHARGER_STATUS_7_REG, &stat);
 	if (rc < 0) {
